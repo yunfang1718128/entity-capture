@@ -488,3 +488,11 @@ pnpm dev            # 拖入 .mcvox 到 Mob 标签页
   僵尸/猪/羊尺寸不变，末影龙 `202×66×252`（N=1，未爆）。
 - `pnpm build:mobs` 已刷新内置库（studio `cat.mcvox` 8×21×57、绿眼体素 4），`pnpm typecheck` ✅。
 **待 studio 目视终检**（猫/豹猫/悦灵，及大模型倍率）。
+
+### 2026-10-02 — v0.2.1：诊断转储改为按需（默认关闭）
+
+**现象：** 每次捕获在 `.mcvox` 之外还多写一份 `<名字>.mcvox.quads.txt`。
+**根因：** `RenderCaptureService.capture` 里 `dumpQuads(...)` 被**无条件**调用；
+PLAN 早先提到的 `ENTITYCAPTURE_DUMP_QUADS` 开关从未接上。
+**修复：** 默认关闭，仅当环境变量 `ENTITYCAPTURE_DUMP_QUADS=true`（或 `1`）时才转储；
+正常捕获只产出 `.mcvox`。只动 `RenderCaptureService` 一处。版本 `0.2.0 → 0.2.1`（bugfix）。

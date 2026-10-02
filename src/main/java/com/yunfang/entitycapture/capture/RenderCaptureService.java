@@ -33,6 +33,12 @@ public final class RenderCaptureService {
 	public static final int UNITS_PER_BLOCK = 16;
 	private static final Logger LOGGER = LoggerFactory.getLogger("entity-capture/RenderCaptureService");
 	private static final int DUMP_QUAD_LIMIT = 400;
+	/**
+	 * Diagnostic quad dump is opt-in: set the {@code ENTITYCAPTURE_DUMP_QUADS=true}
+	 * environment variable before launching. Left off, a capture writes only the
+	 * {@code .mcvox} and never a side-car {@code .quads.txt}.
+	 */
+	private static final boolean DUMP_QUADS = readDumpFlag();
 
 	private RenderCaptureService() {
 	}
@@ -75,7 +81,9 @@ public final class RenderCaptureService {
 			Path path = McvoxWriter.write(directory.toPath(), header, grid, true);
 
 			logSummary(entity, buffers, quads, grid, path, (System.nanoTime() - startedAt) / 1_000_000.0D);
-			dumpQuads(path, quads);
+			if (DUMP_QUADS) {
+				dumpQuads(path, quads);
+			}
 
 			return new CaptureResult(path, quads.size(), grid.nonEmptyVoxels(), grid.sizeX, grid.sizeY, grid.sizeZ);
 		} finally {
@@ -136,6 +144,11 @@ public final class RenderCaptureService {
 		Path dumpPath = mcvoxPath.resolveSibling(mcvoxPath.getFileName().toString() + ".quads.txt");
 		Files.writeString(dumpPath, text.toString());
 		LOGGER.info("capture quad dump written to {}", dumpPath);
+	}
+
+	private static boolean readDumpFlag() {
+		String value = System.getenv("ENTITYCAPTURE_DUMP_QUADS");
+		return value != null && (value.equalsIgnoreCase("true") || value.equals("1"));
 	}
 
 	private static void preparePose(Entity entity) {
