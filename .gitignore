@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Eclipse
+bin/
+*.launch
+.settings/
+.classpath
+.project
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Fabric run directory (world, logs, captured .mcvox)
+run/
+
+# Logs
+*.log
