@@ -11,13 +11,8 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.glfw.GLFW;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class EntityCaptureClient implements ClientModInitializer {
-	public static final String MOD_ID = "entity-capture";
-	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
-
 	private static final KeyMapping CAPTURE_KEY = new KeyMapping(
 			"key.entity-capture.capture",
 			InputConstants.Type.KEYSYM,
@@ -32,6 +27,8 @@ public class EntityCaptureClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		EntityCapture.setPlatform("1.21.1", "fabric");
+
 		KeyBindingHelper.registerKeyBinding(CAPTURE_KEY);
 		KeyBindingHelper.registerKeyBinding(PICKER_KEY);
 

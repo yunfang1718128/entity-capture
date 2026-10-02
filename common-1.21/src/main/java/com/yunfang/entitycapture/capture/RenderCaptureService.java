@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.yunfang.entitycapture.EntityCapture;
 import com.yunfang.entitycapture.mcvox.McvoxHeader;
 import com.yunfang.entitycapture.mcvox.McvoxWriter;
 import com.yunfang.entitycapture.texture.TextureSampler;
@@ -69,8 +70,8 @@ public final class RenderCaptureService {
 					McvoxWriter.FORMAT_VERSION,
 					entityId(entity),
 					entityName(entity),
-					"1.21.1",
-					"fabric",
+					EntityCapture.mcVersion(),
+					EntityCapture.loader(),
 					UNITS_PER_BLOCK,
 					new int[] { grid.sizeX, grid.sizeY, grid.sizeZ },
 					true,

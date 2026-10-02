@@ -11,7 +11,7 @@ import java.util.Set;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
-import com.yunfang.entitycapture.EntityCaptureClient;
+import com.yunfang.entitycapture.EntityCapture;
 import com.yunfang.entitycapture.capture.CaptureManager;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -358,7 +358,7 @@ public class EntityPickerScreen extends Screen {
 			guiGraphics.flush();
 			pose.popPose();
 		} catch (Throwable throwable) {
-			EntityCaptureClient.LOGGER.warn("Entity preview failed for {}", entity.getType(), throwable);
+			EntityCapture.LOGGER.warn("Entity preview failed for {}", entity.getType(), throwable);
 			guiGraphics.drawCenteredString(this.font, Component.translatable("gui.entity-capture.preview_failed"),
 					x + w / 2, y + h / 2 - 4, 0xFF8080);
 		}

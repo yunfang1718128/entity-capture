@@ -3,8 +3,9 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch:
+      - "fabric-v*"
+      - "neoforge-v*"
+      - "forge-v*"
 
 permissions:
   contents: write
@@ -13,24 +14,57 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve target loader from tag
+        id: target
+        run: |
+          ref="${GITHUB_REF_NAME}"
+          case "$ref" in
+            fabric-v*)   loader=fabric;   project=fabric-1.21;   java=21;;
+            neoforge-v*) loader=neoforge; project=neoforge-1.21; java=21;;
+            forge-v*)    loader=forge;    project=forge-1.20;    java=17;;
+            *) echo "Unsupported release tag: $ref" >&2; exit 1;;
+          esac
+          echo "loader=$loader"   >> "$GITHUB_OUTPUT"
+          echo "project=$project" >> "$GITHUB_OUTPUT"
+          echo "java=$java"       >> "$GITHUB_OUTPUT"
+          echo "Resolved: loader=$loader project=$project java=$java"
+
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK ${{ steps.target.outputs.java }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: ${{ steps.target.outputs.java }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build
+      - name: Build ${{ steps.target.outputs.loader }}
+        env:
+          PROJECT: ${{ steps.target.outputs.project }}
         run: |
           chmod +x ./gradlew
-          ./gradlew build --no-daemon
+          VERSION="${GITHUB_REF_NAME#*-v}"
+          ./gradlew ":${PROJECT}:build" -Pmod_version="${VERSION}" --no-daemon --console=plain
+
+      - name: Collect jar with loader suffix
+        env:
+          LOADER: ${{ steps.target.outputs.loader }}
+          PROJECT: ${{ steps.target.outputs.project }}
+        run: |
+          mkdir -p dist
+          for f in "${PROJECT}"/build/libs/entity-capture-*.jar; do
+            case "$f" in
+              *-sources.jar) continue;;
+            esac
+            base="$(basename "$f" .jar)"
+            cp "$f" "dist/${base}-${LOADER}.jar"
+          done
+          ls -l dist
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/libs/entity-capture-*.jar
+          files: dist/*.jar
           generate_release_notes: true

@@ -1,5 +1,6 @@
 package com.yunfang.entitycapture.voxel;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import com.yunfang.entitycapture.capture.Quad;
@@ -29,8 +30,20 @@ import net.minecraft.resources.ResourceLocation;
 public final class Voxelizer {
 	private static final float ALPHA_CUTOFF = 0.1F;
 	private static final double EPSILON = 1.0e-9;
-	/** Block-space tolerance for deciding a model is mirrored across x = 0. */
-	private static final double SYMMETRY_TOLERANCE = 0.02D;
+	/**
+	 * Block-space tolerance for deciding a model is mirrored across x = 0.
+	 * Posed limbs (a piglin's bent arms) can differ by a hair (< 0.03) on the
+	 * two sides; a too-tight tolerance wrongly declares such a mob asymmetric
+	 * and skips the mirror repair, leaving one side of the back jutting out.
+	 */
+	private static final double SYMMETRY_TOLERANCE = 0.05D;
+	/**
+	 * A face plane whose depth lands within this many voxels of an integer is
+	 * snapped to it. Sub-pixel pose tilt (a zombie leg is ~0.29&deg; rotated)
+	 * otherwise pushes a face a fraction past a boundary and the rasteriser
+	 * eats an extra layer along the whole edge.
+	 */
+	private static final double PLANE_SNAP = 0.15D;
 	/** Guard against accidentally capturing something enormous. */
 	private static final int MAX_DIM = 1024;
 	/** Largest integer supersample applied when a texture is finer than the grid. */
@@ -44,6 +57,28 @@ public final class Voxelizer {
 	public static VoxelGrid voxelize(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
 		if (quads.isEmpty()) {
 			return new VoxelGrid(1, 1, 1);
+		}
+
+		// Match the voxel pitch to the texture pitch so one texel owns one voxel:
+		//  - density > 1: the model renders smaller than its texture (a cat's face
+		//    squeezed into fewer pixels), so supersample by an integer factor to
+		//    keep fine features such as the gap between two eyes.
+		//  - density < 1: the model renders larger than its texture (a scaled-up
+		//    entity, e.g. a husk at 17/16 or a 6x giant), so pull the geometry
+		//    back to the texture pitch; otherwise every face gains a whole extra
+		//    layer and joints grow notches.
+		double density = maxTexelDensity(quads, sampler, unitsPerBlock);
+		int factor = 1;
+		double geometryScale = 1.0D;
+		if (density > 1.0D + 1.0e-3) {
+			factor = Math.min(MAX_SUPERSAMPLE, (int) Math.ceil(density - 1.0e-3));
+		} else if (density > 1.0e-6 && density < 1.0D - 1.0e-3) {
+			// Guard the lower bound: density stays 0 when no texture could be read,
+			// and we must not collapse the geometry in that case.
+			geometryScale = density;
+		}
+		if (geometryScale != 1.0D) {
+			quads = scaleAll(quads, geometryScale);
 		}
 
 		double[] min = { Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE };
@@ -63,11 +98,6 @@ public final class Voxelizer {
 			}
 		}
 
-		// Some models render smaller than their texture (e.g. a cat's 5-texel face
-		// squeezed into 4 render pixels), which would merge fine features such as
-		// the gap between two eyes. Supersample by an integer factor so every
-		// texture texel owns at least one voxel; density-1 models stay at 1.
-		int factor = supersampleFactor(quads, sampler, unitsPerBlock);
 		double scale = (double) unitsPerBlock * factor;
 		double[] origin = new double[3];
 		int[] size = new int[3];
@@ -114,11 +144,13 @@ public final class Voxelizer {
 	}
 
 	/**
-	 * Integer factor by which to oversample so no voxel spans more than one
-	 * texture texel. 1 for models whose texture matches their render size.
+	 * Largest texture-texels-per-voxel ratio over all quad edges. Exactly 1 for a
+	 * model whose texture matches its render size; greater than 1 when the
+	 * texture is finer (needs supersampling); less than 1 when the model renders
+	 * larger than its texture (needs normalising down).
 	 */
-	private static int supersampleFactor(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
-		double density = 1.0D;
+	private static double maxTexelDensity(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
+		double density = 0.0D;
 		for (Quad quad : quads) {
 			if (quad.texture() == null) {
 				continue;
@@ -130,10 +162,30 @@ public final class Voxelizer {
 			density = Math.max(density, texelDensity(quad.v0(), quad.v1(), image, unitsPerBlock));
 			density = Math.max(density, texelDensity(quad.v1(), quad.v2(), image, unitsPerBlock));
 		}
-		if (density <= 1.0D + 1.0e-3) {
-			return 1;
+		return density;
+	}
+
+	/** Uniformly scales every vertex position (UV, tint and normal untouched). */
+	private static List<Quad> scaleAll(List<Quad> quads, double factor) {
+		List<Quad> scaled = new ArrayList<>(quads.size());
+		for (Quad quad : quads) {
+			scaled.add(new Quad(
+					scaleVertex(quad.v0(), factor),
+					scaleVertex(quad.v1(), factor),
+					scaleVertex(quad.v2(), factor),
+					scaleVertex(quad.v3(), factor),
+					quad.texture(),
+					quad.layer()));
 		}
-		return Math.min(MAX_SUPERSAMPLE, (int) Math.ceil(density - 1.0e-3));
+		return scaled;
+	}
+
+	private static Vertex scaleVertex(Vertex vertex, double factor) {
+		Vertex scaled = new Vertex(vertex);
+		scaled.x = (float) (vertex.x * factor);
+		scaled.y = (float) (vertex.y * factor);
+		scaled.z = (float) (vertex.z * factor);
+		return scaled;
 	}
 
 	/** Texture texels spanned by a quad edge per base voxel along that edge. */
@@ -290,7 +342,12 @@ public final class Voxelizer {
 				}
 
 				double pc = wA * component(a, dominant) + wB * component(b, dominant) + wC * component(c, dominant);
-				int ic = (int) Math.floor((pc - context.origin()[dominant]) * scale + inward + 1.0e-6);
+				double off = (pc - context.origin()[dominant]) * scale;
+				double nearest = Math.floor(off + 0.5D);
+				if (Math.abs(off - nearest) < PLANE_SNAP) {
+					off = nearest;
+				}
+				int ic = (int) Math.floor(off + inward + 1.0e-6);
 				if (ic < 0) {
 					ic = 0;
 				} else if (ic >= context.size()[dominant]) {

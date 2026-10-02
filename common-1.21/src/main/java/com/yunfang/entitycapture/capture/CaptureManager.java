@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
 
-import com.yunfang.entitycapture.EntityCaptureClient;
+import com.yunfang.entitycapture.EntityCapture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -124,18 +124,18 @@ public final class CaptureManager {
 		try {
 			entity = type.create(client.level);
 		} catch (Throwable throwable) {
-			EntityCaptureClient.LOGGER.warn("Batch capture could not create {}", id(type), throwable);
+			EntityCapture.LOGGER.warn("Batch capture could not create {}", id(type), throwable);
 			return false;
 		}
 		if (entity == null) {
-			EntityCaptureClient.LOGGER.warn("Batch capture could not create {}", id(type));
+			EntityCapture.LOGGER.warn("Batch capture could not create {}", id(type));
 			return false;
 		}
 		try {
 			RenderCaptureService.capture(entity);
 			return true;
 		} catch (Exception exception) {
-			EntityCaptureClient.LOGGER.error("Batch capture failed for {}", id(type), exception);
+			EntityCapture.LOGGER.error("Batch capture failed for {}", id(type), exception);
 			return false;
 		}
 	}
@@ -145,7 +145,7 @@ public final class CaptureManager {
 			RenderCaptureService.CaptureResult result = RenderCaptureService.capture(entity);
 			filenameFeedback(result);
 		} catch (Exception exception) {
-			EntityCaptureClient.LOGGER.error("Entity capture failed", exception);
+			EntityCapture.LOGGER.error("Entity capture failed", exception);
 			feedback("捕获失败：" + exception.getMessage());
 		}
 	}
@@ -166,7 +166,7 @@ public final class CaptureManager {
 		if (client.player != null) {
 			client.player.displayClientMessage(Component.literal(message), false);
 		}
-		EntityCaptureClient.LOGGER.info(message);
+		EntityCapture.LOGGER.info(message);
 	}
 
 	private static void actionbar(String message) {
