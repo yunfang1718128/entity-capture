@@ -18,17 +18,15 @@
 - 放大、空心/填充、方块匹配、`.litematic` 导出全在 [MC Block Studio](https://github.com/yunfang1718128/mc-block-studio) 完成。
 - Studio 已内置 **82 种原版生物**的 `.mcvox`，可直接使用；本模组用于补录模组生物、重新捕获或私有实例。
 
+## 下载 / 安装
+
+- 下载：[GitHub Releases](https://github.com/yunfang1718128/entity-capture/releases/latest) 里最新的 `entity-capture-<版本>.jar`。
+- 安装：Fabric **1.21.1** 客户端，把 jar 放进 `.minecraft/mods/`，并装好 **Fabric API**。
+
 ## 环境要求
 
 - Minecraft **1.21.1**、Fabric Loader **0.19.5**、Fabric API **0.116.17+1.21.1**
 - Java **21**
-
-## 构建与运行
-
-```bash
-./gradlew build        # 产物：build/libs/entity-capture-<版本>.jar
-./gradlew runClient    # 启动开发客户端
-```
 
 ## 使用
 
@@ -47,29 +45,7 @@
 
 写入游戏根目录 `entity-capture/`：
 
-- `minecraft_zombie_<时间戳>.mcvox` —— 捕获包
-- `minecraft_zombie_<时间戳>.mcvox.quads.txt` —— 诊断用四边形转储（精确浮点 + 法线）
-
-## `.mcvox` 格式 v1（provisional）
-
-单文件二进制，两边都不需要 zip 依赖：
-
-```
-[0..3]   magic "MCVX"
-[4]      uint8  formatVersion = 1
-[5]      uint8  flags (bit0 = 负载 zlib/deflate 压缩)
-[6..7]   uint16 reserved
-[8..11]  uint32 headerLength (LE)
-[12..]   header JSON (UTF-8)
-然后     occupancy: ceil(n / 8) 字节（位图，LSB 优先，n = sizeX*sizeY*sizeZ）
-然后     colors:    n * 4 字节 RGBA
-```
-
-- 坐标：`+Y` 上、`+Z` 南、`+X` 东，原点为模型 AABB 最小角；体素索引 `x + z*sizeX + y*sizeX*sizeZ`。
-- `occupancy` 位 = 1 表示模型占据该格子。
-- `colors`：**表面体素**存贴图原色（无光照）；内部与空体素为 `0,0,0,0`。
-
-实现细节、诊断记录与路线规划见 [`PLAN.md`](./PLAN.md)。
+- `minecraft_zombie_<时间戳>.mcvox` —— 捕获包（导入 MC Block Studio 使用）
 
 ## 许可证
 
