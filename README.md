@@ -1,7 +1,7 @@
 # Entity Capture
 
-一个 Fabric **客户端**模组：把 Minecraft 里的**任意实体**（含模组生物）在 **1:1 原生分辨率**下
-转成带颜色的体素捕获包 `.mcvox`。
+一个 **Fabric / NeoForge / Forge** 的 **客户端**模组：把 Minecraft 里的**任意实体**（含模组生物）
+在 **1:1 原生分辨率**下转成带颜色的体素捕获包 `.mcvox`。
 
 它是像素画工具 [**MC Block Studio**](https://github.com/yunfang1718128/mc-block-studio) 的配套采集端。
 
@@ -18,15 +18,27 @@
 - 放大、空心/填充、方块匹配、`.litematic` 导出全在 [MC Block Studio](https://github.com/yunfang1718128/mc-block-studio) 完成。
 - Studio 已内置 **82 种原版生物**的 `.mcvox`，可直接使用；本模组用于补录模组生物、重新捕获或私有实例。
 
+## 支持的加载器 / 版本
+
+| 加载器 | Minecraft | Java | 额外前置 | 发布产物 |
+|---|---|---|---|---|
+| Fabric | 1.21.1 | 21 | Fabric API | `entity-capture-<版本>-fabric.jar` |
+| NeoForge | 1.21.1 | 21 | 无 | `entity-capture-<版本>-neoforge.jar` |
+| Forge | 1.20.1 | 17 | 无 | 计划中 |
+
+三种产物写出的 `.mcvox` 格式完全一致，仅头部 `modLoader` 字段区分为 `fabric` / `neoforge` / `forge`；MC Block Studio 无需改动即可读取。
+
 ## 下载 / 安装
 
-- 下载：[GitHub Releases](https://github.com/yunfang1718128/entity-capture/releases/latest) 里最新的 `entity-capture-<版本>.jar`。
-- 安装：Fabric **1.21.1** 客户端，把 jar 放进 `.minecraft/mods/`，并装好 **Fabric API**。
+- 下载：[GitHub Releases](https://github.com/yunfang1718128/entity-capture/releases) 里对应加载器的 jar。
+- Fabric：把 `entity-capture-<版本>-fabric.jar` 放进 `.minecraft/mods/`，并装好 **Fabric API**。
+- NeoForge：把 `entity-capture-<版本>-neoforge.jar` 放进 `.minecraft/mods/`，需要 NeoForge **21.1.x**（Minecraft **1.21.1**）。
 
 ## 环境要求
 
-- Minecraft **1.21.1**、Fabric Loader **0.19.5**、Fabric API **0.116.17+1.21.1**
-- Java **21**
+- Fabric：Minecraft **1.21.1**、Loader **0.19.5**、Fabric API **0.116.17+1.21.1**、Java **21**
+- NeoForge：Minecraft **1.21.1**、NeoForge **21.1.x**、Java **21**
+- Forge：Minecraft **1.20.1**、Java **17**（计划中）
 
 ## 使用
 
@@ -46,6 +58,9 @@
 写入游戏根目录 `entity-capture/`：
 
 - `minecraft_zombie_<时间戳>.mcvox` —— 捕获包（导入 MC Block Studio 使用）
+- 头部包含 `mcVersion`、`modLoader`、`unitsPerBlock`、`dimensions`、`solid` 等字段，供 Studio 识别与还原。
+
+所有生物（含被放大渲染的，如尸壳、巨人）统一按原生贴图 **1:1** 捕获，轮廓不会多一层或出现缺口。
 
 ## 许可证
 
