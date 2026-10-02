@@ -27,3 +27,6 @@ run/
 
 # Logs
 *.log
+
+# Local dev notes (not published)
+PLAN.md
