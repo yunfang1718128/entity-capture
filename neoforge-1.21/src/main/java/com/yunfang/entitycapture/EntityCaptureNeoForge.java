@@ -3,6 +3,7 @@ package com.yunfang.entitycapture;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.yunfang.entitycapture.capture.CaptureManager;
 import com.yunfang.entitycapture.command.CaptureCommand;
+import com.yunfang.entitycapture.config.EntityCaptureConfig;
 import com.yunfang.entitycapture.gui.EntityPickerScreen;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -10,6 +11,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
@@ -35,6 +37,7 @@ public class EntityCaptureNeoForge {
 
 	public EntityCaptureNeoForge(IEventBus modBus, ModContainer container) {
 		EntityCapture.setPlatform("1.21.1", "neoforge");
+		EntityCaptureConfig.load(FMLPaths.CONFIGDIR.get());
 
 		modBus.addListener(this::registerKeyMappings);
 		NeoForge.EVENT_BUS.addListener(this::registerClientCommands);

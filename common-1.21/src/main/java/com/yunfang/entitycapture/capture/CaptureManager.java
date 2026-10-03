@@ -5,12 +5,22 @@ import java.util.Collection;
 import java.util.Deque;
 
 import com.yunfang.entitycapture.EntityCapture;
+import com.yunfang.entitycapture.config.EntityCaptureConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.animal.Sheep;
+import net.minecraft.world.entity.animal.horse.AbstractHorse;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Bridges the (command / keybind / picker GUI) entry points to the render-thread
@@ -67,9 +77,10 @@ public final class CaptureManager {
 			if (lookedAt == null) {
 				feedback("没有可用准星实体，请瞄准一个生物");
 			} else {
-				// Capture a fresh instance of the looked-at type so we never mutate
-				// the live entity's pose. NBT/variant capture lands in a later milestone.
-				spawnAndRun(lookedAt.getType());
+				// Capture a copy that carries the looked-at entity's NBT so variants
+				// (dragon colour, horse markings, cat colour, …) are preserved. The
+				// live entity itself is never mutated.
+				spawnCopy(lookedAt);
 			}
 		}
 
@@ -113,7 +124,85 @@ public final class CaptureManager {
 		if (entity == null) {
 			feedback("无法创建实体：" + type.getDescriptionId());
 		} else {
-			run(entity);
+			run(entity, false);
+		}
+	}
+
+	/**
+	 * Captures a copy of the looked-at entity carrying its full NBT, so variant
+	 * data (colour, markings, growth stage, …) survives instead of resetting to
+	 * the type's default. The live entity is never touched: a fresh instance is
+	 * rebuilt from saved NBT. Transient pose/state is stripped (see
+	 * {@link VariantSanitizer}) and equipment is stripped unless enabled in the
+	 * config. Falls back to the default variant when the NBT cannot be
+	 * round-tripped (some mod entities) so a capture never hard-fails.
+	 */
+	private static void spawnCopy(Entity source) {
+		Minecraft client = Minecraft.getInstance();
+		EntityCaptureConfig config = EntityCaptureConfig.get();
+		if (!config.variantCapture) {
+			spawnAndRun(source.getType());
+			return;
+		}
+
+		Entity copy = null;
+		try {
+			CompoundTag tag = source.saveWithoutId(new CompoundTag());
+			ResourceLocation key = BuiltInRegistries.ENTITY_TYPE.getKey(source.getType());
+			if (key != null) {
+				// EntityType.create(tag, level) resolves the type from "id", which
+				// saveWithoutId deliberately omits, so restore it before round-tripping.
+				tag.putString("id", key.toString());
+				VariantSanitizer.sanitize(tag, config.keepEquipment);
+				copy = EntityType.create(tag, client.level).orElse(null);
+			}
+		} catch (Throwable throwable) {
+			EntityCapture.LOGGER.warn("Variant capture could not copy {}; using default", id(source.getType()), throwable);
+		}
+		if (copy == null) {
+			spawnAndRun(source.getType());
+		} else {
+			neutralizeClone(copy, config.keepEquipment);
+			run(copy, true);
+		}
+	}
+
+	/**
+	 * Second line of defence for state a mod may not serialise: resets the known
+	 * vanilla posture/overlay flags on the clone. Babies ({@code Age}) are left
+	 * untouched on purpose.
+	 */
+	private static void neutralizeClone(Entity copy, boolean keepEquipment) {
+		try {
+			copy.setPose(Pose.STANDING);
+			copy.clearFire();
+			copy.setInvisible(false);
+			copy.setGlowingTag(false);
+			copy.setSilent(false);
+			copy.ejectPassengers();
+
+			if (copy instanceof LivingEntity living) {
+				living.stopSleeping();
+				living.removeAllEffects();
+				living.setHealth(living.getMaxHealth());
+			}
+			if (copy instanceof TamableAnimal tamable) {
+				tamable.setInSittingPose(false);
+				tamable.setOrderedToSit(false);
+			}
+			if (copy instanceof Sheep sheep) {
+				sheep.setSheared(false);
+			}
+			if (copy instanceof AbstractHorse horse) {
+				horse.setEating(false);
+			}
+			if (!keepEquipment && copy instanceof Mob mob) {
+				for (EquipmentSlot slot : EquipmentSlot.values()) {
+					mob.setItemSlot(slot, ItemStack.EMPTY);
+				}
+			}
+		} catch (Throwable throwable) {
+			EntityCapture.LOGGER.warn("Could not fully neutralise clone; capture continues", throwable);
 		}
 	}
 
@@ -140,10 +229,10 @@ public final class CaptureManager {
 		}
 	}
 
-	private static void run(Entity entity) {
+	private static void run(Entity entity, boolean variant) {
 		try {
 			RenderCaptureService.CaptureResult result = RenderCaptureService.capture(entity);
-			filenameFeedback(result);
+			filenameFeedback(result, variant);
 		} catch (Exception exception) {
 			EntityCapture.LOGGER.error("Entity capture failed", exception);
 			feedback("捕获失败：" + exception.getMessage());
@@ -155,10 +244,11 @@ public final class CaptureManager {
 		return key == null ? String.valueOf(type) : key.toString();
 	}
 
-	private static void filenameFeedback(RenderCaptureService.CaptureResult result) {
+	private static void filenameFeedback(RenderCaptureService.CaptureResult result, boolean variant) {
 		String name = result.path().getFileName().toString();
-		feedback(String.format("已捕获 %dx%dx%d，%d 个体素 → %s",
-				result.sizeX(), result.sizeY(), result.sizeZ(), result.voxels(), name));
+		String prefix = variant ? "已捕获变体" : "已捕获";
+		feedback(String.format("%s %dx%dx%d，%d 个体素 → %s",
+				prefix, result.sizeX(), result.sizeY(), result.sizeZ(), result.voxels(), name));
 	}
 
 	private static void feedback(String message) {

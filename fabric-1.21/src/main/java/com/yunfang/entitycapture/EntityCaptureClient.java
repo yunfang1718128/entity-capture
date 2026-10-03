@@ -3,11 +3,13 @@ package com.yunfang.entitycapture;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.yunfang.entitycapture.capture.CaptureManager;
 import com.yunfang.entitycapture.command.CaptureCommand;
+import com.yunfang.entitycapture.config.EntityCaptureConfig;
 import com.yunfang.entitycapture.gui.EntityPickerScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.glfw.GLFW;
@@ -28,6 +30,7 @@ public class EntityCaptureClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		EntityCapture.setPlatform("1.21.1", "fabric");
+		EntityCaptureConfig.load(FabricLoader.getInstance().getConfigDir());
 
 		KeyBindingHelper.registerKeyBinding(CAPTURE_KEY);
 		KeyBindingHelper.registerKeyBinding(PICKER_KEY);
