@@ -1,0 +1,17 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "com.yunfang.entitycapture.mixin",
+	"compatibilityLevel": "JAVA_17",
+	"refmap": "entity-capture.refmap.json",
+	"client": [
+		"AnimationUtilsMixin",
+		"BufferSourceMixin",
+		"CompositeRenderTypeAccessor",
+		"CompositeStateAccessor",
+		"EmptyTextureStateShardAccessor"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

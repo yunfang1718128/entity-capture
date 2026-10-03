@@ -5,10 +5,12 @@ out/
 
 # Eclipse
 bin/
+.eclipse/
 *.launch
 .settings/
 .classpath
 .project
+.factorypath
 
 # IntelliJ IDEA
 .idea/
@@ -19,15 +21,21 @@ bin/
 # VS Code
 .vscode/
 
-# macOS
-.DS_Store
-
-# Fabric run directory (world, logs, captured .mcvox)
+# Run directories (world, logs) and captured output
 run/
+/entity-capture/
+*.mcvox
+*.mcvox.quads.txt
 
 # Logs
 *.log
 
-# Local dev notes (not published)
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local dev notes / tooling (not published)
 PLAN.md
 HANDOFF.md
+run.ps1

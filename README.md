@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | Fabric | 1.21.1 | 21 | Fabric API | `entity-capture-<版本>-fabric.jar` |
 | NeoForge | 1.21.1 | 21 | 无 | `entity-capture-<版本>-neoforge.jar` |
-| Forge | 1.20.1 | 17 | 无 | 计划中 |
+| Forge | 1.20.1 | 17 | 无 | `entity-capture-<版本>-forge.jar` |
 
 三种产物写出的 `.mcvox` 格式完全一致，仅头部 `modLoader` 字段区分为 `fabric` / `neoforge` / `forge`；MC Block Studio 无需改动即可读取。
 
@@ -33,12 +33,13 @@
 - 下载：[GitHub Releases](https://github.com/yunfang1718128/entity-capture/releases) 里对应加载器的 jar。
 - Fabric：把 `entity-capture-<版本>-fabric.jar` 放进 `.minecraft/mods/`，并装好 **Fabric API**。
 - NeoForge：把 `entity-capture-<版本>-neoforge.jar` 放进 `.minecraft/mods/`，需要 NeoForge **21.1.x**（Minecraft **1.21.1**）。
+- Forge：把 `entity-capture-<版本>-forge.jar` 放进 `.minecraft/mods/`，需要 Forge **47.x**（Minecraft **1.20.1**）。
 
 ## 环境要求
 
 - Fabric：Minecraft **1.21.1**、Loader **0.19.5**、Fabric API **0.116.17+1.21.1**、Java **21**
 - NeoForge：Minecraft **1.21.1**、NeoForge **21.1.x**、Java **21**
-- Forge：Minecraft **1.20.1**、Java **17**（计划中）
+- Forge：Minecraft **1.20.1**、Forge **47.x**、Java **17**
 
 ## 使用
 

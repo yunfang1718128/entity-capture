@@ -1,0 +1,88 @@
+plugins {
+	id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+	id 'org.spongepowered.mixin' version '0.7.+'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+sourceSets {
+	main {
+		java.srcDir rootProject.file('common-1.20/src/main/java')
+		resources.srcDir rootProject.file('common-1.20/src/main/resources')
+	}
+}
+
+minecraft {
+	mappings channel: 'official', version: project.forge_mc_version
+
+	runs {
+		client {
+			workingDirectory project.file('run')
+			property 'forge.logging.markers', ''
+			property 'forge.logging.console.level', 'debug'
+
+			mods {
+				entity_capture {
+					source sourceSets.main
+				}
+			}
+		}
+	}
+}
+
+mixin {
+	add sourceSets.main, 'entity-capture.refmap.json'
+	config 'entity-capture.mixins.json'
+}
+
+repositories {
+	maven {
+		name = 'MinecraftForge'
+		url = 'https://maven.minecraftforge.net/'
+	}
+	mavenCentral()
+}
+
+dependencies {
+	minecraft "net.minecraftforge:forge:${project.forge_version}"
+	annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("META-INF/mods.toml") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.encoding = 'UTF-8'
+	it.options.release = 17
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+jar {
+	def baseName = project.archives_base_name
+	inputs.property "baseName", baseName
+
+	from("LICENSE") {
+		rename { "${it}_$baseName" }
+	}
+}

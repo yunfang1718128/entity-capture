@@ -46,7 +46,10 @@ jobs:
         run: |
           chmod +x ./gradlew
           VERSION="${GITHUB_REF_NAME#*-v}"
-          ./gradlew ":${PROJECT}:build" -Pmod_version="${VERSION}" --no-daemon --console=plain
+          # --configure-on-demand: each loader has its own JDK (Fabric/NeoForge 21,
+          # Forge 17); without it Gradle would evaluate the Java-21 Loom project on
+          # the Java-17 Forge job and fail.
+          ./gradlew ":${PROJECT}:build" -Pmod_version="${VERSION}" --configure-on-demand --no-daemon --console=plain
 
       - name: Collect jar with loader suffix
         env:
