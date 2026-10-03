@@ -60,6 +60,9 @@ public final class RenderCaptureService {
 			TextureSampler sampler = new TextureSampler();
 			CapturingMultiBufferSource buffers = new CapturingMultiBufferSource();
 			PoseStack poseStack = new PoseStack();
+			// Let renderers that grab the global buffer source (e.g. GeckoLib
+			// armour) be captured too; see BufferSourceMixin.
+			CaptureSession.begin(buffers);
 			dispatcher.render(entity, 0.0D, 0.0D, 0.0D, 0.0F, 0.0F, poseStack, buffers, LightTexture.FULL_BRIGHT);
 			buffers.flush();
 
@@ -88,6 +91,7 @@ public final class RenderCaptureService {
 
 			return new CaptureResult(path, quads.size(), grid.nonEmptyVoxels(), grid.sizeX, grid.sizeY, grid.sizeZ);
 		} finally {
+			CaptureSession.end();
 			CapturePose.setNeutralPose(false);
 			dispatcher.setRenderShadow(true);
 		}
