@@ -26,6 +26,7 @@ public final class CapturingMultiBufferSource implements MultiBufferSource {
 	private final List<Quad> quads = new ArrayList<>();
 	private final Map<ResourceLocation, Integer> textureCounts = new HashMap<>();
 	private final Set<String> unresolvedRenderTypes = new LinkedHashSet<>();
+	private final Set<String> requestedRenderTypes = new LinkedHashSet<>();
 	private int nullTextureQuads;
 	/** Render order of layers; 0 is the first requested (base model), higher = overlays. */
 	private int nextLayer;
@@ -33,6 +34,7 @@ public final class CapturingMultiBufferSource implements MultiBufferSource {
 	@Override
 	public VertexConsumer getBuffer(RenderType renderType) {
 		return this.buffers.computeIfAbsent(renderType, type -> {
+			this.requestedRenderTypes.add(type.getClass().getSimpleName() + " => " + type);
 			ResourceLocation texture = RenderTypeTextures.resolve(type).orElse(null);
 			if (texture == null) {
 				this.unresolvedRenderTypes.add(type.getClass().getName() + " => " + type);
@@ -75,5 +77,10 @@ public final class CapturingMultiBufferSource implements MultiBufferSource {
 	/** Render types that produced no texture (likely non-composite or unsupported). */
 	public Set<String> unresolvedRenderTypes() {
 		return this.unresolvedRenderTypes;
+	}
+
+	/** Every distinct render type asked for during the capture, in request order. */
+	public Set<String> requestedRenderTypes() {
+		return this.requestedRenderTypes;
 	}
 }

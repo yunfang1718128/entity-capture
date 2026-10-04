@@ -34,7 +34,7 @@ import org.slf4j.LoggerFactory;
 public final class RenderCaptureService {
 	public static final int UNITS_PER_BLOCK = 16;
 	private static final Logger LOGGER = LoggerFactory.getLogger("entity-capture/RenderCaptureService");
-	private static final int DUMP_QUAD_LIMIT = 400;
+	private static final int DUMP_QUAD_LIMIT = 4000;
 	/**
 	 * Diagnostic quad dump is opt-in: set the {@code ENTITYCAPTURE_DUMP_QUADS=true}
 	 * environment variable before launching. Left off, a capture writes only the
@@ -161,6 +161,11 @@ public final class RenderCaptureService {
 				path.getFileName());
 		if (!buffers.unresolvedRenderTypes().isEmpty()) {
 			LOGGER.warn("capture {}: unresolved render types -> {}", entityId(entity), buffers.unresolvedRenderTypes());
+		}
+		if (DUMP_QUADS) {
+			// Which layers were asked for at all — distinguishes "that layer never drew"
+			// from "it drew but we could not read its texture".
+			LOGGER.info("capture {}: requested render types -> {}", entityId(entity), buffers.requestedRenderTypes());
 		}
 	}
 
