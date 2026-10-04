@@ -88,6 +88,11 @@ public final class CaptureManager {
 		if (typeRequested != null) {
 			EntityType<?> type = typeRequested;
 			typeRequested = null;
+			// A type-based capture has no creature to take identity from, so for mods
+			// like Cobblemon the file says "pokemon" but is not the one the player meant.
+			if (ModCaptureCompat.needsLiveEntityForIdentity(type)) {
+				feedback("按类型捕获拿不到具体是哪一只，请瞄着它按 G");
+			}
 			spawnAndRun(type);
 		}
 

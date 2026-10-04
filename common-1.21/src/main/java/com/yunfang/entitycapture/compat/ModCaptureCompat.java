@@ -9,6 +9,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 
 /**
  * Per-mod capture compatibility rules.
@@ -55,10 +56,50 @@ public final class ModCaptureCompat {
 		return key != null && LIVE_NAMESPACES.contains(key.getNamespace());
 	}
 
-	/** Whether this mod's entities can be re-created fresh and given the looked-at identity. */
+	/**
+	 * Whether entities of this type carry per-creature identity that a type-based
+	 * capture cannot reproduce — i.e. {@code /capturemob <type>} and the batch GUI
+	 * cannot tell you <em>which</em> one you got, so aiming is the only faithful
+	 * entry point.
+	 */
+	public static boolean needsLiveEntityForIdentity(EntityType<?> type) {
+		ResourceLocation key = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+		return key != null && IDENTITY_NAMESPACES.contains(key.getNamespace());
+	}
+
+	/** Whether this mod's entities can be re-created fresh and given the looked-at
+	 * identity. Gated on the entity actually exposing the accessors, not just on its
+	 * namespace: Cobblemon has 29 entity classes and only {@code PokemonEntity}
+	 * carries a Pokémon, so a namespace check alone would send the other 28 down a
+	 * path that can only fail.
+	 */
 	public static boolean wantsIdentityTransfer(Entity entity) {
 		ResourceLocation key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
-		return key != null && IDENTITY_NAMESPACES.contains(key.getNamespace());
+		if (key == null || !IDENTITY_NAMESPACES.contains(key.getNamespace())) {
+			return false;
+		}
+		return identityGetter(entity.getClass()) != null && identitySetter(entity.getClass(), null) != null;
+	}
+
+	private static Method identityGetter(Class<?> entityClass) {
+		try {
+			return entityClass.getMethod("getPokemon");
+		} catch (NoSuchMethodException exception) {
+			return null;
+		}
+	}
+
+	/** @param identityClass which argument must be accepted, or {@code null} for "any single-argument setter" */
+	private static Method identitySetter(Class<?> entityClass, Class<?> identityClass) {
+		for (Method method : entityClass.getMethods()) {
+			if (!method.getName().equals("setPokemon") || method.getParameterCount() != 1) {
+				continue;
+			}
+			if (identityClass == null || method.getParameterTypes()[0].isAssignableFrom(identityClass)) {
+				return method;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -79,26 +120,25 @@ public final class ModCaptureCompat {
 	 * @return whether {@code copy} now carries {@code source}'s identity
 	 */
 	public static boolean applyIdentity(Entity source, Entity copy, RegistryAccess registryAccess) {
-		if (!wantsIdentityTransfer(source)) {
-			return false;
-		}
 		try {
-			Object identity = source.getClass().getMethod("getPokemon").invoke(source);
+			Method getter = identityGetter(source.getClass());
+			if (getter == null) {
+				return false;
+			}
+			Object identity = getter.invoke(source);
 			if (identity == null) {
 				return false;
 			}
 			Object detached = identity.getClass()
 					.getMethod("clone", boolean.class, RegistryAccess.class)
 					.invoke(identity, false, registryAccess);
-			for (Method setter : copy.getClass().getMethods()) {
-				if (setter.getName().equals("setPokemon") && setter.getParameterCount() == 1
-						&& setter.getParameterTypes()[0].isInstance(detached)) {
-					setter.invoke(copy, detached);
-					return true;
-				}
+			Method setter = identitySetter(copy.getClass(), detached.getClass());
+			if (setter == null) {
+				EntityCapture.LOGGER.warn("Cobblemon identity has no setter on {}", copy.getClass().getName());
+				return false;
 			}
-			EntityCapture.LOGGER.warn("Cobblemon identity has no setter on {}", copy.getClass().getName());
-			return false;
+			setter.invoke(copy, detached);
+			return true;
 		} catch (Throwable throwable) {
 			EntityCapture.LOGGER.warn("Could not transfer identity from {}; falling back to live capture",
 					source.getClass().getName(), throwable);
