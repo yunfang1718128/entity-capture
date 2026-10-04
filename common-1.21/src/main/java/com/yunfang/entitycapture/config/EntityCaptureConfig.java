@@ -21,6 +21,13 @@ public final class EntityCaptureConfig {
 	public boolean variantCapture = true;
 	/** Keep equipment/decorations (saddle, armour, collar, held items, …). */
 	public boolean keepEquipment = false;
+	/**
+	 * Render a mod mob in the pose it happens to be in, instead of a neutral one.
+	 * Off (default) captures are reproducible: the same creature always yields the
+	 * same file. Only affects mods that can be re-created with their identity
+	 * transferred (currently Cobblemon); everything else keeps its own rules.
+	 */
+	public boolean poseCapture = false;
 
 	private EntityCaptureConfig() {
 	}
@@ -65,6 +72,7 @@ public final class EntityCaptureConfig {
 			switch (key) {
 				case "variantCapture" -> this.variantCapture = flag;
 				case "keepEquipment" -> this.keepEquipment = flag;
+				case "poseCapture" -> this.poseCapture = flag;
 				default -> {
 				}
 			}
@@ -100,6 +108,14 @@ public final class EntityCaptureConfig {
 				"# 是否保留鞍、马铠、项圈、手持与护甲等装备及装饰。",
 				"# Keeps saddle, horse armour, collar, held and armour items, and other decorations.",
 				"keepEquipment = " + this.keepEquipment,
+				"",
+				"# 姿态捕获（默认关闭）/ Capture pose (default: off)",
+				"# 关闭：模组生物按中性姿态捕获，同一只每次产物完全一致（可复现）。",
+				"# 开启：按生物当下姿势捕获（走活体方式），产物会随它的动作变化。",
+				"# Off: mod mobs are captured in a neutral pose, so the same creature always yields the same file.",
+				"# On: the creature is rendered exactly as it currently poses, so results vary with its animation.",
+				"# 目前只影响方块宝可梦（Cobblemon）/ Currently only affects Cobblemon.",
+				"poseCapture = " + this.poseCapture,
 				"")) + "\n";
 	}
 }
