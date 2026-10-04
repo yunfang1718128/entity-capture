@@ -146,6 +146,24 @@ public final class CaptureManager {
 			return;
 		}
 
+		// A mod whose entity loses its identity in an NBT round-trip is rebuilt fresh
+		// and given that identity directly: a new instance has no animation history,
+		// so the capture stays pose-neutral and repeat captures of the same creature
+		// produce the same file. poseCapture=yes opts back into rendering the live
+		// entity, which follows the creature's current pose and varies per capture.
+		if (!config.poseCapture && ModCaptureCompat.wantsIdentityTransfer(source)) {
+			Entity fresh = source.getType().create(client.level);
+			if (fresh != null && ModCaptureCompat.applyIdentity(source, fresh, client.level.registryAccess())) {
+				neutralizeClone(fresh, config.keepEquipment);
+				if (run(fresh, true) > 0) {
+					return;
+				}
+			}
+			feedback("未能复制该生物的身份数据，改按现场实体捕获（同一只每次产物可能不同）");
+			runLive(source);
+			return;
+		}
+
 		// Some mods cannot survive a client-side NBT round-trip (their save/load
 		// codecs disagree and the fallback is a random variant — see
 		// ModCaptureCompat). Render those live instead of cloning them.
@@ -238,13 +256,16 @@ public final class CaptureManager {
 		}
 	}
 
-	private static void run(Entity entity, boolean variant) {
+	/** Captures {@code entity} and reports how many voxels came out (0 or less: nothing usable). */
+	private static int run(Entity entity, boolean variant) {
 		try {
 			RenderCaptureService.CaptureResult result = RenderCaptureService.capture(entity);
 			filenameFeedback(result, variant);
+			return result.voxels();
 		} catch (Exception exception) {
 			EntityCapture.LOGGER.error("Entity capture failed", exception);
 			feedback("捕获失败：" + exception.getMessage());
+			return -1;
 		}
 	}
 
