@@ -22,6 +22,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,6 +95,56 @@ public final class RenderCaptureService {
 			CaptureSession.end();
 			CapturePose.setNeutralPose(false);
 			dispatcher.setRenderShadow(true);
+		}
+	}
+
+	/**
+	 * Captures an entity that is <em>live in the world</em> by temporarily
+	 * relocating and re-posing it for the render, then restoring its exact
+	 * position, rotation, motion and tick count. Used for mods whose entities do
+	 * not survive a client-side NBT round-trip (see
+	 * {@link com.yunfang.entitycapture.compat.ModCaptureCompat}), where cloning
+	 * the entity would silently produce a different variant.
+	 *
+	 * <p>The entity is restored in a {@code finally} block, so an exception during
+	 * rendering never leaves it displaced.
+	 */
+	public static CaptureResult captureLive(Entity entity) throws IOException {
+		double x = entity.getX();
+		double y = entity.getY();
+		double z = entity.getZ();
+		float xRot = entity.getXRot();
+		float yRot = entity.getYRot();
+		Vec3 motion = entity.getDeltaMovement();
+		int tickCount = entity.tickCount;
+		float yHeadRot = yRot;
+		float yHeadRotO = yRot;
+		float yBodyRot = yRot;
+		float yBodyRotO = yRot;
+		LivingEntity living = entity instanceof LivingEntity livingEntity ? livingEntity : null;
+		if (living != null) {
+			yHeadRot = living.yHeadRot;
+			yHeadRotO = living.yHeadRotO;
+			yBodyRot = living.yBodyRot;
+			yBodyRotO = living.yBodyRotO;
+		}
+		try {
+			return capture(entity);
+		} finally {
+			entity.setPos(x, y, z);
+			entity.setYRot(yRot);
+			entity.setXRot(xRot);
+			entity.setYHeadRot(yHeadRot);
+			entity.setYBodyRot(yBodyRot);
+			entity.setDeltaMovement(motion);
+			entity.tickCount = tickCount;
+			if (living != null) {
+				living.yHeadRot = yHeadRot;
+				living.yHeadRotO = yHeadRotO;
+				living.yBodyRot = yBodyRot;
+				living.yBodyRotO = yBodyRotO;
+			}
+			entity.setOldPosAndRot();
 		}
 	}
 

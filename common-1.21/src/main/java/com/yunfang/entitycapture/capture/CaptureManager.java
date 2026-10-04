@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.Deque;
 
 import com.yunfang.entitycapture.EntityCapture;
+import com.yunfang.entitycapture.compat.ModCaptureCompat;
 import com.yunfang.entitycapture.config.EntityCaptureConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -145,6 +146,14 @@ public final class CaptureManager {
 			return;
 		}
 
+		// Some mods cannot survive a client-side NBT round-trip (their save/load
+		// codecs disagree and the fallback is a random variant — see
+		// ModCaptureCompat). Render those live instead of cloning them.
+		if (ModCaptureCompat.shouldRenderLive(source)) {
+			runLive(source);
+			return;
+		}
+
 		Entity copy = null;
 		try {
 			CompoundTag tag = source.saveWithoutId(new CompoundTag());
@@ -235,6 +244,17 @@ public final class CaptureManager {
 			filenameFeedback(result, variant);
 		} catch (Exception exception) {
 			EntityCapture.LOGGER.error("Entity capture failed", exception);
+			feedback("捕获失败：" + exception.getMessage());
+		}
+	}
+
+	/** Captures a live entity in place; used for ModCaptureCompat namespaces. */
+	private static void runLive(Entity entity) {
+		try {
+			RenderCaptureService.CaptureResult result = RenderCaptureService.captureLive(entity);
+			filenameFeedback(result, true);
+		} catch (Exception exception) {
+			EntityCapture.LOGGER.error("Live entity capture failed", exception);
 			feedback("捕获失败：" + exception.getMessage());
 		}
 	}
