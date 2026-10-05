@@ -23,6 +23,12 @@ public final class CaptureCommand {
 					context.getSource().sendSuccess(() -> Component.literal("正在捕获准星实体…"), false);
 					return 1;
 				})
+				.then(Commands.literal("self")
+						.executes(context -> {
+							CaptureManager.requestSelf();
+							context.getSource().sendSuccess(() -> Component.literal("正在捕获玩家自己…"), false);
+							return 1;
+						}))
 				.then(Commands.argument("entity", ResourceLocationArgument.id())
 						.suggests((context, builder) -> SharedSuggestionProvider.suggestResource(
 								BuiltInRegistries.ENTITY_TYPE.keySet(), builder))

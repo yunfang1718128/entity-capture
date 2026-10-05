@@ -1,5 +1,6 @@
 package com.yunfang.entitycapture.capture;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
@@ -7,10 +8,14 @@ import java.util.Deque;
 import com.yunfang.entitycapture.EntityCapture;
 import com.yunfang.entitycapture.compat.ModCaptureCompat;
 import com.yunfang.entitycapture.config.EntityCaptureConfig;
+import com.yunfang.entitycapture.mixin.PlayerModeCustomisationAccessor;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -21,6 +26,7 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.animal.horse.AbstractHorse;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -33,6 +39,7 @@ import net.minecraft.world.item.ItemStack;
  */
 public final class CaptureManager {
 	private static volatile boolean lookRequested;
+	private static volatile boolean selfRequested;
 	private static volatile EntityType<?> typeRequested;
 
 	private static final Deque<EntityType<?>> batch = new ArrayDeque<>();
@@ -45,6 +52,10 @@ public final class CaptureManager {
 
 	public static void requestLookedAt() {
 		lookRequested = true;
+	}
+
+	public static void requestSelf() {
+		selfRequested = true;
 	}
 
 	public static void requestType(EntityType<?> type) {
@@ -64,6 +75,7 @@ public final class CaptureManager {
 		Minecraft client = Minecraft.getInstance();
 		if (client.level == null) {
 			lookRequested = false;
+			selfRequested = false;
 			typeRequested = null;
 			if (batchTotal > 0) {
 				feedback("批量捕获已中止：世界未加载");
@@ -82,6 +94,16 @@ public final class CaptureManager {
 				// (dragon colour, horse markings, cat colour, …) are preserved. The
 				// live entity itself is never mutated.
 				spawnCopy(lookedAt);
+			}
+		}
+
+		if (selfRequested) {
+			selfRequested = false;
+			Player self = client.player;
+			if (self == null) {
+				feedback("没有可用玩家，请先进入世界");
+			} else {
+				captureSelf(self);
 			}
 		}
 
@@ -283,6 +305,80 @@ public final class CaptureManager {
 			EntityCapture.LOGGER.error("Live entity capture failed", exception);
 			feedback("捕获失败：" + exception.getMessage());
 		}
+	}
+
+	/**
+	 * Captures the player's own entity. By default the player is rendered in a
+	 * neutral standing pose: their skin, worn armour, held items and cape are kept
+	 * (the clone reuses the player's profile so {@code PlayerInfo} supplies the real
+	 * skin), but the current stance — sneaking, swimming, elytra, riding, mid-stride
+	 * — is not. Set {@code poseCapture=yes} to render the live player and keep the
+	 * current pose instead. The live player itself is never mutated in the default
+	 * path.
+	 */
+	private static void captureSelf(Player player) {
+		if (EntityCaptureConfig.get().poseCapture) {
+			captureSelfLive(player);
+			return;
+		}
+		try {
+			captureSelfNeutral(player);
+		} catch (Throwable throwable) {
+			EntityCapture.LOGGER.warn("Neutral self capture failed; falling back to the live pose", throwable);
+			captureSelfLive(player);
+		}
+	}
+
+	/**
+	 * Renders a fresh {@link RemotePlayer} carrying the player's identity: synced
+	 * data (skin layers / handedness), equipment and profile are copied, while the
+	 * pose flags are reset to a standing rest. A new entity has no animation
+	 * history, so limbs are at rest — the same neutral result a cloned mob gets.
+	 */
+	private static void captureSelfNeutral(Player player) throws IOException {
+		Minecraft client = Minecraft.getInstance();
+		if (!(client.level instanceof ClientLevel level)) {
+			captureSelfLive(player);
+			return;
+		}
+
+		RemotePlayer clone = new RemotePlayer(level, player.getGameProfile());
+		// Match the source's skin-layer visibility and handedness. Everything else
+		// (pose, flags, animation) is left at the fresh entity's defaults, i.e. a
+		// neutral standing rest — unlike the live player, which may be sneaking,
+		// swimming, elytra-flying, riding or mid-stride.
+		EntityDataAccessor<Byte> customisation = PlayerModeCustomisationAccessor.getModeCustomisation();
+		clone.getEntityData().set(customisation, player.getEntityData().get(customisation));
+		clone.setMainArm(player.getMainArm());
+		for (EquipmentSlot slot : EquipmentSlot.values()) {
+			clone.setItemSlot(slot, player.getItemBySlot(slot).copy());
+		}
+
+		selfFeedback(RenderCaptureService.capture(clone));
+	}
+
+	/**
+	 * Renders the live player as-is, preserving the current pose. The player is
+	 * briefly forced visible so an invisibility effect does not yield an empty
+	 * capture, and is restored afterwards.
+	 */
+	private static void captureSelfLive(Player player) {
+		boolean invisible = player.isInvisible();
+		player.setInvisible(false);
+		try {
+			selfFeedback(RenderCaptureService.captureLive(player));
+		} catch (Exception exception) {
+			EntityCapture.LOGGER.error("Self capture failed", exception);
+			feedback("捕获失败：" + exception.getMessage());
+		} finally {
+			player.setInvisible(invisible);
+		}
+	}
+
+	private static void selfFeedback(RenderCaptureService.CaptureResult result) {
+		String name = result.path().getFileName().toString();
+		feedback(String.format("已捕获玩家自己 %dx%dx%d，%d 个体素 → %s",
+				result.sizeX(), result.sizeY(), result.sizeZ(), result.voxels(), name));
 	}
 
 	private static String id(EntityType<?> type) {

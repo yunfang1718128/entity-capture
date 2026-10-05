@@ -27,6 +27,12 @@ public class EntityCaptureClient implements ClientModInitializer {
 			GLFW.GLFW_KEY_H,
 			"category.entity-capture");
 
+	private static final KeyMapping SELF_KEY = new KeyMapping(
+			"key.entity-capture.capture_self",
+			InputConstants.Type.KEYSYM,
+			GLFW.GLFW_KEY_J,
+			"category.entity-capture");
+
 	@Override
 	public void onInitializeClient() {
 		EntityCapture.setPlatform("1.21.1", "fabric");
@@ -34,6 +40,7 @@ public class EntityCaptureClient implements ClientModInitializer {
 
 		KeyBindingHelper.registerKeyBinding(CAPTURE_KEY);
 		KeyBindingHelper.registerKeyBinding(PICKER_KEY);
+		KeyBindingHelper.registerKeyBinding(SELF_KEY);
 
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> CaptureCommand.register(dispatcher));
 
@@ -45,6 +52,9 @@ public class EntityCaptureClient implements ClientModInitializer {
 				if (client.screen == null && client.level != null) {
 					client.setScreen(new EntityPickerScreen());
 				}
+			}
+			while (SELF_KEY.consumeClick()) {
+				CaptureManager.requestSelf();
 			}
 			CaptureManager.processPending();
 		});

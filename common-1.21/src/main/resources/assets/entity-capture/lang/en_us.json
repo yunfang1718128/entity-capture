@@ -1,6 +1,7 @@
 {
 	"key.entity-capture.capture": "Capture Looked-at Entity",
 	"key.entity-capture.picker": "Open Entity Picker",
+	"key.entity-capture.capture_self": "Capture Yourself",
 	"category.entity-capture": "Entity Capture",
 	"gui.entity-capture.title": "Entity Capture",
 	"gui.entity-capture.search": "Search",

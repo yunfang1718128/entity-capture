@@ -73,11 +73,12 @@ public final class EntityCaptureConfig {
 					c -> c.keepEquipment),
 			new Option("poseCapture", new String[] {
 					"# 姿态捕获（默认关闭）/ Capture pose (default: off)",
-					"# 关闭：模组生物按中性姿态捕获，同一只每次产物完全一致（可复现）。",
-					"# 开启：按生物当下姿势捕获（走活体方式），产物会随它的动作变化。",
-					"# Off: mod mobs are captured in a neutral pose, so the same creature always yields the same file.",
-					"# On: the creature is rendered exactly as it currently poses, so results vary with its animation.",
-					"# 目前只影响方块宝可梦（Cobblemon）/ Currently only affects Cobblemon.", }, c -> c.poseCapture));
+					"# 关闭：模组生物与玩家自己按中性姿态捕获，同一只每次产物完全一致（可复现）。",
+					"# 开启：按当下姿势捕获（走活体方式），产物会随它的动作变化。",
+					"# Off: mod mobs and your own player are captured in a neutral pose, so the same subject always yields the same file.",
+					"# On: the subject is rendered exactly as it currently poses, so results vary with its animation.",
+					"# 目前影响方块宝可梦（Cobblemon）与捕获玩家自己 / Currently affects Cobblemon and capturing yourself.", },
+					c -> c.poseCapture));
 
 	private EntityCaptureConfig() {
 	}

@@ -35,6 +35,12 @@ public class EntityCaptureNeoForge {
 			GLFW.GLFW_KEY_H,
 			"category.entity-capture");
 
+	private static final KeyMapping SELF_KEY = new KeyMapping(
+			"key.entity-capture.capture_self",
+			InputConstants.Type.KEYSYM,
+			GLFW.GLFW_KEY_J,
+			"category.entity-capture");
+
 	public EntityCaptureNeoForge(IEventBus modBus, ModContainer container) {
 		EntityCapture.setPlatform("1.21.1", "neoforge");
 		EntityCaptureConfig.load(FMLPaths.CONFIGDIR.get());
@@ -47,6 +53,7 @@ public class EntityCaptureNeoForge {
 	private void registerKeyMappings(RegisterKeyMappingsEvent event) {
 		event.register(CAPTURE_KEY);
 		event.register(PICKER_KEY);
+		event.register(SELF_KEY);
 	}
 
 	private void registerClientCommands(RegisterClientCommandsEvent event) {
@@ -62,6 +69,9 @@ public class EntityCaptureNeoForge {
 			if (client.screen == null && client.level != null) {
 				client.setScreen(new EntityPickerScreen());
 			}
+		}
+		while (SELF_KEY.consumeClick()) {
+			CaptureManager.requestSelf();
 		}
 		CaptureManager.processPending();
 	}

@@ -1,6 +1,7 @@
 {
 	"key.entity-capture.capture": "捕获准星实体",
 	"key.entity-capture.picker": "打开实体选择器",
+	"key.entity-capture.capture_self": "捕获玩家自己",
 	"category.entity-capture": "实体捕获",
 	"gui.entity-capture.title": "实体捕获",
 	"gui.entity-capture.search": "搜索",
