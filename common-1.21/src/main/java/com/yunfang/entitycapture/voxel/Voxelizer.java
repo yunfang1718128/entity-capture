@@ -60,18 +60,30 @@ public final class Voxelizer {
 		}
 
 		// Match the voxel pitch to the texture pitch so one texel owns one voxel:
-		//  - density > 1: the model renders smaller than its texture (a cat's face
-		//    squeezed into fewer pixels), so supersample by an integer factor to
-		//    keep fine features such as the gap between two eyes.
 		//  - density < 1: the model renders larger than its texture (a scaled-up
 		//    entity, e.g. a husk at 17/16 or a 6x giant), so pull the geometry
 		//    back to the texture pitch; otherwise every face gains a whole extra
 		//    layer and joints grow notches.
+		//  - density > 1: the model renders smaller than its texture. An integral
+		//    ratio (a cat's face squeezed into half as many pixels) is worth a real
+		//    supersample, which keeps fine features such as the gap between two
+		//    eyes. A merely fractional one is not: a player is drawn at 15/16 (see
+		//    PlayerRenderer#scale) while its skin is 1 texel per model pixel, so
+		//    rounding 1.067 up to 2 doubles the whole grid — and, because the 15/16
+		//    geometry then sits off the voxel grid, makes the outline ripple. Scale
+		//    the geometry to the texture pitch instead, exactly as the density < 1
+		//    case does in the other direction. (The same trap catches every model
+		//    drawn at a fractional scale: illagers, villagers, witches and
+		//    wandering traders all use 15/16 too.)
 		double density = maxTexelDensity(quads, sampler, unitsPerBlock);
 		int factor = 1;
 		double geometryScale = 1.0D;
 		if (density > 1.0D + 1.0e-3) {
-			factor = Math.min(MAX_SUPERSAMPLE, (int) Math.ceil(density - 1.0e-3));
+			if (Math.round(density) >= 2) {
+				factor = Math.min(MAX_SUPERSAMPLE, (int) Math.ceil(density - 1.0e-3));
+			} else {
+				geometryScale = density;
+			}
 		} else if (density > 1.0e-6 && density < 1.0D - 1.0e-3) {
 			// Guard the lower bound: density stays 0 when no texture could be read,
 			// and we must not collapse the geometry in that case.
