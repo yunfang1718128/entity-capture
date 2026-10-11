@@ -41,6 +41,13 @@ public final class EntityCaptureConfig {
 	 */
 	public boolean poseCapture = false;
 
+	/**
+	 * Write a {@code .quads.txt} side-car next to every capture, listing the raw
+	 * quads (position, UV, tint, normal, texture). Diagnostic only: it is how a
+	 * capture's geometry can be replayed and measured offline without guessing.
+	 */
+	public boolean dumpQuads = false;
+
 	/** An option and the comment block that explains it in the file. */
 	private record Option(String key, String[] comment, Function<EntityCaptureConfig, Boolean> value) {
 		private String line(EntityCaptureConfig config) {
@@ -78,7 +85,16 @@ public final class EntityCaptureConfig {
 					"# Off: mod mobs and your own player are captured in a neutral pose, so the same subject always yields the same file.",
 					"# On: the subject is rendered exactly as it currently poses, so results vary with its animation.",
 					"# 目前影响方块宝可梦（Cobblemon）与捕获玩家自己 / Currently affects Cobblemon and capturing yourself.", },
-					c -> c.poseCapture));
+					c -> c.poseCapture),
+			new Option("dumpQuads", new String[] {
+					"# 转储四边形（默认关闭）/ Dump quads (default: off)",
+					"# 开启后，每次捕获会在 .mcvox 旁边多写一份 <同名>.mcvox.quads.txt，",
+					"# 记录这次拿到的全部四边形（坐标 / UV / 颜色 / 法线 / 贴图）。",
+					"# 仅供排查用，不影响产物；不需要时请关掉，否则文件会越积越多。",
+					"# On: each capture also writes a <name>.mcvox.quads.txt beside the .mcvox, listing",
+					"# every quad it received (position, UV, tint, normal, texture). Diagnostics only;",
+					"# it does not change the capture. Turn it back off so the files do not pile up.", },
+					c -> c.dumpQuads));
 
 	private EntityCaptureConfig() {
 	}
@@ -130,6 +146,7 @@ public final class EntityCaptureConfig {
 				case "variantCapture" -> this.variantCapture = flag;
 				case "keepEquipment" -> this.keepEquipment = flag;
 				case "poseCapture" -> this.poseCapture = flag;
+				case "dumpQuads" -> this.dumpQuads = flag;
 				default -> {
 				}
 			}

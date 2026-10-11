@@ -13,6 +13,7 @@ import java.util.Map;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.yunfang.entitycapture.EntityCapture;
+import com.yunfang.entitycapture.config.EntityCaptureConfig;
 import com.yunfang.entitycapture.mcvox.McvoxHeader;
 import com.yunfang.entitycapture.mcvox.McvoxWriter;
 import com.yunfang.entitycapture.mixin.PlayerModeCustomisationAccessor;
@@ -42,11 +43,18 @@ public final class RenderCaptureService {
 	private static final Logger LOGGER = LoggerFactory.getLogger("entity-capture/RenderCaptureService");
 	private static final int DUMP_QUAD_LIMIT = 4000;
 	/**
-	 * Diagnostic quad dump is opt-in: set the {@code ENTITYCAPTURE_DUMP_QUADS=true}
-	 * environment variable before launching. Left off, a capture writes only the
+	 * Diagnostic quad dump is opt-in: set {@code dumpQuads = true} in
+	 * {@code entity-capture.toml}, or set {@code ENTITYCAPTURE_DUMP_QUADS} in the
+	 * environment for a one-off run. Left off, a capture writes only the
 	 * {@code .mcvox} and never a side-car {@code .quads.txt}.
 	 */
-	private static final boolean DUMP_QUADS = readDumpFlag();
+	private static boolean dumpQuadsEnabled() {
+		if (EntityCaptureConfig.get().dumpQuads) {
+			return true;
+		}
+		String value = System.getenv("ENTITYCAPTURE_DUMP_QUADS");
+		return value != null && (value.equalsIgnoreCase("true") || value.equals("1"));
+	}
 	private static final EntityDataAccessor<Byte> PLAYER_MODEL_PARTS = PlayerModeCustomisationAccessor.getModeCustomisation();
 	/** {@code PlayerModelPart.CAPE} owns bit 0 of the model-part byte; bits 1-6 are the skin's outer layers. */
 	private static final int PLAYER_MODEL_PART_CAPE_BIT = 0x01;
@@ -102,7 +110,8 @@ public final class RenderCaptureService {
 							Integer.toHexString(modelParts), base.size());
 				}
 			}
-			VoxelGrid grid = Voxelizer.voxelize(base, overlay, sampler, UNITS_PER_BLOCK);
+			Voxelizer.Stats voxelStats = new Voxelizer.Stats();
+			VoxelGrid grid = Voxelizer.voxelize(base, overlay, sampler, UNITS_PER_BLOCK, voxelStats);
 
 			McvoxHeader header = new McvoxHeader(
 					McvoxWriter.FORMAT_VERSION,
@@ -120,8 +129,8 @@ public final class RenderCaptureService {
 			Path path = McvoxWriter.write(directory.toPath(), header, grid, true);
 
 			List<Quad> quads = stats.quads();
-			logSummary(entity, stats, quads, grid, path, (System.nanoTime() - startedAt) / 1_000_000.0D);
-			if (DUMP_QUADS) {
+			logSummary(entity, stats, quads, grid, voxelStats, path, (System.nanoTime() - startedAt) / 1_000_000.0D);
+			if (dumpQuadsEnabled()) {
 				dumpQuads(path, quads);
 			}
 
@@ -230,7 +239,7 @@ public final class RenderCaptureService {
 		}
 	}
 
-	private static void logSummary(Entity entity, CapturingMultiBufferSource buffers, List<Quad> quads, VoxelGrid grid, Path path, double millis) {
+	private static void logSummary(Entity entity, CapturingMultiBufferSource buffers, List<Quad> quads, VoxelGrid grid, Voxelizer.Stats voxelStats, Path path, double millis) {
 		LOGGER.info("capture {}: quads={} (nullTex={}) textures={} bounds={} grid={}x{}x{} voxels={} time={}ms file={}",
 				entityId(entity),
 				quads.size(),
@@ -244,11 +253,43 @@ public final class RenderCaptureService {
 		if (!buffers.unresolvedRenderTypes().isEmpty()) {
 			LOGGER.warn("capture {}: unresolved render types -> {}", entityId(entity), buffers.unresolvedRenderTypes());
 		}
-		if (DUMP_QUADS) {
+		if (dumpQuadsEnabled()) {
 			// Which layers were asked for at all — distinguishes "that layer never drew"
 			// from "it drew but we could not read its texture".
 			LOGGER.info("capture {}: requested render types -> {}", entityId(entity), buffers.requestedRenderTypes());
 		}
+		logMirrorStatus(entity, voxelStats);
+	}
+
+	/**
+	 * Reports the left/right verdict for this capture. The rasteriser is
+	 * equivariant by construction, so a mirror-symmetric model must come out
+	 * symmetric; anything else is either a model whose own geometry is asymmetric
+	 * (a mod's animated pose, a one-sided part) or a pipeline regression. These
+	 * lines are what tells the two apart without a debugger or a hex editor.
+	 */
+	private static void logMirrorStatus(Entity entity, Voxelizer.Stats voxelStats) {
+		if (voxelStats.unmatchedMirrorQuads < 0) {
+			return;
+		}
+		if (voxelStats.unmatchedMirrorQuads > 0) {
+			LOGGER.info("capture {}: source is not mirror-symmetric ({} quads have no mirror partner) — "
+							+ "the model's own geometry is asymmetric, so left/right output may legitimately differ",
+					entityId(entity), voxelStats.unmatchedMirrorQuads);
+			return;
+		}
+		if (voxelStats.mirrorCellsAdded > 0) {
+			LOGGER.warn("capture {}: mirror-symmetric source needed {} silhouette cells patched — "
+							+ "pipeline defect, please report it", entityId(entity), voxelStats.mirrorCellsAdded);
+			return;
+		}
+		// Colour is a property of the model's own artwork as well as of the pipeline:
+		// a skin whose left and right sides are not mirrored copies reports a count
+		// here and is not a defect. Reported, not asserted.
+		LOGGER.info("capture {}: mirror check ok (symmetric source, no patching; {} mirror pairs coloured differently; "
+						+ "density={} factor={} geometryScale={})",
+				entityId(entity), voxelStats.mirrorColourMismatches, String.format("%.4f", voxelStats.densityUsed),
+				voxelStats.supersampleFactor, String.format("%.4f", voxelStats.geometryScale));
 	}
 
 	/** Human-readable vertex AABB in blocks, or "n/a" when there are no quads. */
@@ -287,11 +328,6 @@ public final class RenderCaptureService {
 		Path dumpPath = mcvoxPath.resolveSibling(mcvoxPath.getFileName().toString() + ".quads.txt");
 		Files.writeString(dumpPath, text.toString());
 		LOGGER.info("capture quad dump written to {}", dumpPath);
-	}
-
-	private static boolean readDumpFlag() {
-		String value = System.getenv("ENTITYCAPTURE_DUMP_QUADS");
-		return value != null && (value.equalsIgnoreCase("true") || value.equals("1"));
 	}
 
 	private static void preparePose(Entity entity) {
