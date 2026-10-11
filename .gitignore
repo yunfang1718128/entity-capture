@@ -44,3 +44,6 @@ CONTRIBUTING.md
 NOTES.md
 TODO.md
 run.ps1
+
+# 本地开发工具不进仓库（离线体素检查等）；它们会把仓库里的真实源码复制进构建目录再编译。
+tools/

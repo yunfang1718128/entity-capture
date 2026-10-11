@@ -132,31 +132,95 @@ public final class VoxelGrid {
 	}
 
 	/**
-	 * Enforce left/right symmetry for a model that is mirror-symmetric about
-	 * {@code x = 0}. Occupancy becomes the union so a voxel dropped on one side
-	 * is restored; colour is only copied into a side that has none — when both
-	 * sides carry a colour they are left alone, so a bright one-sided feature
-	 * (a white eye, for instance) is never painted over by the other side. The
-	 * caller checks that the model is actually symmetric first.
+	 * Union the two halves of a model that is mirror-symmetric about {@code x = 0}.
+	 * Colour is only copied into a side that has none — when both sides carry a
+	 * colour they are left alone, so a bright one-sided feature (a white eye, for
+	 * instance) is never painted over by the other side.
+	 *
+	 * <p>The rasteriser is equivariant, so a symmetric model should need nothing
+	 * from this method. It reports how many silhouette cells it had to add: zero is
+	 * the expected answer, and a non-zero one is a signal for the caller to log
+	 * rather than a routine repair to keep quiet about.
+	 *
+	 * @return silhouette cells added to make the occupancy symmetric
 	 */
-	public void enforceXMirrorSymmetry() {
+	public int enforceXMirrorSymmetry() {
+		int added = 0;
 		int half = this.sizeX / 2;
 		for (int x = 0; x < half; x++) {
 			int mirror = this.sizeX - 1 - x;
 			for (int y = 0; y < this.sizeY; y++) {
 				for (int z = 0; z < this.sizeZ; z++) {
-					this.mergeMirrorPair(this.index(mirror, y, z), this.index(x, y, z));
+					added += this.mergeMirrorPair(this.index(mirror, y, z), this.index(x, y, z));
 				}
 			}
 		}
+		return added;
 	}
 
-	private void mergeMirrorPair(int a, int b) {
-		boolean occupiedA = (this.occupancy[a >> 3] & (1 << (a & 7))) != 0;
-		boolean occupiedB = (this.occupancy[b >> 3] & (1 << (b & 7))) != 0;
-		if (!occupiedA && !occupiedB) {
-			return;
+	/**
+	 * Silhouette cells that are missing on one side of a mirror pair, i.e. how many
+	 * cells {@link #enforceXMirrorSymmetry()} would have to add. Measured without
+	 * changing anything, so "faithful" mode can report what it chose not to repair.
+	 */
+	public int mirrorMissingCells() {
+		int missing = 0;
+		int half = this.sizeX / 2;
+		for (int x = 0; x < half; x++) {
+			int mirror = this.sizeX - 1 - x;
+			for (int y = 0; y < this.sizeY; y++) {
+				for (int z = 0; z < this.sizeZ; z++) {
+					boolean a = this.occupied(this.index(x, y, z));
+					boolean b = this.occupied(this.index(mirror, y, z));
+					if (a != b) {
+						missing++;
+					}
+				}
+			}
 		}
+		return missing;
+	}
+
+	/**
+	 * Mirror pairs that are both occupied yet coloured differently. A symmetric
+	 * model on a symmetric pipeline reports zero; anything else is either artwork
+	 * that genuinely differs left to right, or an asymmetry that slipped through.
+	 */
+	public int mirrorColourMismatches() {
+		int mismatches = 0;
+		int half = this.sizeX / 2;
+		for (int x = 0; x < half; x++) {
+			int mirror = this.sizeX - 1 - x;
+			for (int y = 0; y < this.sizeY; y++) {
+				for (int z = 0; z < this.sizeZ; z++) {
+					int a = this.index(x, y, z);
+					int b = this.index(mirror, y, z);
+					if (!this.occupied(a) || !this.occupied(b)) {
+						continue;
+					}
+					if (this.colors[a * 4] != this.colors[b * 4]
+							|| this.colors[a * 4 + 1] != this.colors[b * 4 + 1]
+							|| this.colors[a * 4 + 2] != this.colors[b * 4 + 2]) {
+						mismatches++;
+					}
+				}
+			}
+		}
+		return mismatches;
+	}
+
+	private boolean occupied(int index) {
+		return (this.occupancy[index >> 3] & (1 << (index & 7))) != 0;
+	}
+
+	/** @return silhouette cells added for this pair, i.e. 0 when it was already symmetric */
+	private int mergeMirrorPair(int a, int b) {
+		boolean occupiedA = this.occupied(a);
+		boolean occupiedB = this.occupied(b);
+		if (!occupiedA && !occupiedB) {
+			return 0;
+		}
+		int added = (occupiedA ? 0 : 1) + (occupiedB ? 0 : 1);
 
 		// Union the occupancy so the silhouette stays symmetric.
 		this.occupancy[a >> 3] |= (byte) (1 << (a & 7));
@@ -171,7 +235,7 @@ public final class VoxelGrid {
 			if (rankA == rankB) {
 				// Same window on both sides: keep each side's own colour so a
 				// feature present on one side is not erased by the other.
-				return;
+				return added;
 			}
 			this.copyColor(rankA > rankB ? a : b, a, b);
 		} else if (coloredA) {
@@ -179,6 +243,7 @@ public final class VoxelGrid {
 		} else if (coloredB) {
 			this.copyColor(b, a, b);
 		}
+		return added;
 	}
 
 	private void copyColor(int source, int a, int b) {

@@ -55,6 +55,31 @@ public final class Voxelizer {
 	}
 
 	public static VoxelGrid voxelize(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
+		return voxelize(quads, sampler, unitsPerBlock, new Stats());
+	}
+
+	/**
+	 * What the pipeline decided for one capture, so the caller can log it instead
+	 * of the pipeline guessing whether to repair or to complain. Pure data: no
+	 * logging dependency, which keeps the voxel stage testable without Minecraft.
+	 */
+	public static final class Stats {
+		/** Texture-texels-per-voxel chosen for the whole model. */
+		public double densityUsed;
+		/** Integer supersample applied on top of one voxel per model pixel. */
+		public int supersampleFactor = 1;
+		/** Non-1 when the geometry was rescaled to the texture pitch instead. */
+		public double geometryScale = 1.0D;
+		/** Quads with no mirror partner across {@code x = 0}; 0 means the model is symmetric. */
+		public int unmatchedMirrorQuads = -1;
+		/** Silhouette cells the mirror repair had to add; 0 when the rasteriser was already symmetric. */
+		public int mirrorCellsAdded;
+		/** Mirror pairs both occupied but coloured differently; 0 for a symmetric pipeline. */
+		public int mirrorColourMismatches = -1;
+	}
+
+	/** As above, additionally reporting what the pipeline decided into {@code stats}. */
+	public static VoxelGrid voxelize(List<Quad> quads, TextureSampler sampler, int unitsPerBlock, Stats stats) {
 		if (quads.isEmpty()) {
 			return new VoxelGrid(1, 1, 1);
 		}
@@ -76,6 +101,7 @@ public final class Voxelizer {
 		//    drawn at a fractional scale: illagers, villagers, witches and
 		//    wandering traders all use 15/16 too.)
 		double density = maxTexelDensity(quads, sampler, unitsPerBlock);
+		stats.densityUsed = density;
 		int factor = 1;
 		double geometryScale = 1.0D;
 		if (density > 1.0D + 1.0e-3) {
@@ -89,6 +115,7 @@ public final class Voxelizer {
 			// and we must not collapse the geometry in that case.
 			geometryScale = density;
 		}
+		stats.geometryScale = geometryScale;
 		if (geometryScale != 1.0D) {
 			quads = scaleAll(quads, geometryScale);
 		}
@@ -119,6 +146,7 @@ public final class Voxelizer {
 			scale = (double) unitsPerBlock * factor;
 			computeBounds(min, max, scale, origin, size);
 		}
+		stats.supersampleFactor = factor;
 
 		VoxelGrid grid = new VoxelGrid(size[0], size[1], size[2]);
 		RasterContext context = new RasterContext(grid, sampler, scale, origin, size);
@@ -131,12 +159,15 @@ public final class Voxelizer {
 			rasterize(context, quad, quad.v0(), quad.v2(), quad.v3());
 		}
 
-		// Many mob models are mirror-symmetric about x = 0; rounding at the
-		// sub-pixel level (overlapping legs, fur layers, tilted arms) can still
-		// leave a one-voxel lopsided result, so mirror the +x half onto the -x
-		// half for those models.
-		if (isMirrorSymmetricX(quads)) {
-			grid.enforceXMirrorSymmetry();
+		// The rasteriser is equivariant under x -> -x, so a mirror-symmetric model
+		// must already come out symmetric. Measure that rather than assume it: these
+		// counts are how a left/right problem is told apart from a model that is
+		// simply asymmetric in its own geometry (a mod's animated pose, a one-sided
+		// part). Nothing is hidden: the caller logs what was found.
+		stats.unmatchedMirrorQuads = unmatchedMirrorQuads(quads);
+		if (stats.unmatchedMirrorQuads == 0) {
+			stats.mirrorCellsAdded = grid.enforceXMirrorSymmetry();
+			stats.mirrorColourMismatches = grid.mirrorColourMismatches();
 		}
 		return grid;
 	}
@@ -216,10 +247,13 @@ public final class Voxelizer {
 	}
 
 	/**
-	 * True when every quad has a counterpart mirrored across x = 0 (its centroid
-	 * points to {@code (-x, y, z)}). Tolerance absorbs float noise in tilted parts.
+	 * How many quads have no counterpart mirrored across {@code x = 0} — a partner
+	 * whose centroid sits at {@code (-x, y, z)}. Zero means the model is
+	 * mirror-symmetric in its own geometry, and the output must therefore be
+	 * symmetric too; a non-zero count means the asymmetry lives in the source.
+	 * Tolerance absorbs float noise in tilted parts.
 	 */
-	private static boolean isMirrorSymmetricX(List<Quad> quads) {
+	private static int unmatchedMirrorQuads(List<Quad> quads) {
 		double[][] centroids = new double[quads.size()][3];
 		for (int i = 0; i < quads.size(); i++) {
 			Quad quad = quads.get(i);
@@ -228,6 +262,7 @@ public final class Voxelizer {
 			centroids[i][2] = (quad.v0().z + quad.v1().z + quad.v2().z + quad.v3().z) / 4.0D;
 		}
 
+		int unmatched = 0;
 		for (int i = 0; i < centroids.length; i++) {
 			boolean matched = false;
 			for (int j = 0; j < centroids.length; j++) {
@@ -239,10 +274,10 @@ public final class Voxelizer {
 				}
 			}
 			if (!matched) {
-				return false;
+				unmatched++;
 			}
 		}
-		return true;
+		return unmatched;
 	}
 
 	private static void include(double[] min, double[] max, Vertex vertex) {
@@ -300,11 +335,6 @@ public final class Voxelizer {
 		}
 		double dominantNormal = dominant == 0 ? fnx : (dominant == 1 ? fny : fnz);
 
-		// A face at plane P joins the solid on the side opposite its outward
-		// normal: a +normal face owns the cell just below P (ceil(P)-1), while a
-		// -normal face owns the cell just above P (floor(P)). In voxel units that
-		// is a half-voxel shift only for +normal faces.
-		double inward = dominantNormal > 0.0 ? -0.5 : 0.0;
 		int facePriority = facePriority(fnx, fny, fnz);
 
 		int axisA = (dominant == 0) ? 1 : 0;
@@ -359,7 +389,7 @@ public final class Voxelizer {
 				if (Math.abs(off - nearest) < PLANE_SNAP) {
 					off = nearest;
 				}
-				int ic = (int) Math.floor(off + inward + 1.0e-6);
+				int ic = interiorVoxel(off, dominantNormal);
 				if (ic < 0) {
 					ic = 0;
 				} else if (ic >= context.size()[dominant]) {
@@ -401,6 +431,31 @@ public final class Voxelizer {
 	 * Ranks a face normal so the one facing the model's front ({@code +Z}) wins
 	 * colour conflicts, then the top ({@code +Y}), then the sides ({@code |X|}).
 	 */
+	/**
+	 * The voxel just inside a face that sits at grid position {@code off}.
+	 *
+	 * <p>A +normal face joins the solid on its lower side, so it owns the last
+	 * voxel whose centre is at or below the plane; a -normal face joins the solid
+	 * on its upper side and owns the first voxel whose centre is at or above it.
+	 * The two answers are mirror images of one another, which is what makes the
+	 * rasteriser equivariant under {@code x -> -x} — and therefore what lets a
+	 * mirror-symmetric model come out symmetric on its own, with no post-hoc
+	 * repair. A model that is asymmetric is asymmetric in its geometry, and the
+	 * pipeline must report that rather than paper over it.
+	 *
+	 * <p>Writing the -normal case as {@code floor(off)} (the behaviour before
+	 * 0.6.3) instead breaks that pairing whenever the plane does not land on a
+	 * whole or half voxel — i.e. for every model drawn at a fractional scale or
+	 * supersampled. The two sides then select different voxels: the silhouette is
+	 * unioned back by the mirror repair while the surface colours are not, so the
+	 * output looks symmetric in outline and lopsided in colour.
+	 */
+	private static int interiorVoxel(double off, double dominantNormal) {
+		return dominantNormal > 0.0
+				? (int) Math.floor(off - 0.5D + 1.0e-6)
+				: (int) Math.ceil(off - 0.5D - 1.0e-6);
+	}
+
 	private static int facePriority(double nx, double ny, double nz) {
 		int pz = nz > 0.5 ? 2 : (nz < -0.5 ? 0 : 1);
 		int py = ny > 0.5 ? 1 : 0;
