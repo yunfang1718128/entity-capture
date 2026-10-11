@@ -16,7 +16,7 @@ public final class VoxelGrid {
 	private final byte[] occupancy;
 	private final byte[] colors;
 	/** Packed rank of the winning quad: {@code (layer << 6) | facePriority}. */
-	private final short[] rank;
+	private final int[] rank;
 
 	public VoxelGrid(int sizeX, int sizeY, int sizeZ) {
 		this.sizeX = sizeX;
@@ -25,7 +25,7 @@ public final class VoxelGrid {
 		int count = sizeX * sizeY * sizeZ;
 		this.occupancy = new byte[(count + 7) / 8];
 		this.colors = new byte[count * 4];
-		this.rank = new short[count];
+		this.rank = new int[count];
 	}
 
 	private int index(int x, int y, int z) {
@@ -34,11 +34,20 @@ public final class VoxelGrid {
 
 	/** Packs the layer (outer wins) and face orientation into one comparable value. */
 	private static int rank(int layer, int facePriority) {
-		return ((layer & 0x3FF) << 6) | (facePriority & 0x3F);
+		return (Math.max(0, layer) << 6) | (facePriority & 0x3F);
 	}
 
 	public boolean inBounds(int x, int y, int z) {
 		return x >= 0 && y >= 0 && z >= 0 && x < this.sizeX && y < this.sizeY && z < this.sizeZ;
+	}
+
+	/** Whether a cell currently holds a surface voxel. */
+	public boolean isOccupied(int x, int y, int z) {
+		if (!this.inBounds(x, y, z)) {
+			return false;
+		}
+		int index = this.index(x, y, z);
+		return (this.occupancy[index >> 3] & (1 << (index & 7))) != 0;
 	}
 
 	/**
@@ -58,7 +67,7 @@ public final class VoxelGrid {
 		int incomingRank = rank(layer, facePriority);
 
 		if ((this.colors[offset + 3] & 0xFF) != 0) {
-			int existingRank = this.rank[index] & 0xFFFF;
+			int existingRank = this.rank[index];
 			if (incomingRank < existingRank) {
 				return;
 			}
@@ -67,7 +76,51 @@ public final class VoxelGrid {
 			}
 		}
 
-		this.rank[index] = (short) incomingRank;
+		this.rank[index] = incomingRank;
+		this.colors[offset] = (byte) r;
+		this.colors[offset + 1] = (byte) g;
+		this.colors[offset + 2] = (byte) b;
+		this.colors[offset + 3] = (byte) a;
+	}
+
+	/**
+	 * Paints over an <em>existing</em> surface voxel and never creates a new one:
+	 * an unoccupied cell is left untouched. Used for a player skin's outer layer,
+	 * which the game draws as a thin shell only a fraction of a voxel outside the
+	 * body — at native resolution it must recolour the surface it covers rather
+	 * than add a voxel shell (which would fuse sleeves to jackets and bury the
+	 * face). Semi-transparent overlay texels are composited over the existing
+	 * colour, matching how the game blends them.
+	 */
+	public void paint(int x, int y, int z, int r, int g, int b, int a, int facePriority, int layer) {
+		if (!this.isOccupied(x, y, z)) {
+			return;
+		}
+		this.paintInto(this.index(x, y, z), r, g, b, a, facePriority, layer);
+	}
+
+	private void paintInto(int index, int r, int g, int b, int a, int facePriority, int layer) {
+		int offset = index * 4;
+		int incomingRank = rank(layer, facePriority);
+		int existingRank = this.rank[index];
+		if (incomingRank < existingRank) {
+			return;
+		}
+		if (incomingRank == existingRank && luminance(this.colors, offset) <= r + g + b) {
+			return;
+		}
+		if (a < 255) {
+			int dstA = this.colors[offset + 3] & 0xFF;
+			int newA = a + dstA * (255 - a) / 255;
+			if (newA == 0) {
+				return;
+			}
+			r = (r * a + (this.colors[offset] & 0xFF) * dstA * (255 - a) / 255) / newA;
+			g = (g * a + (this.colors[offset + 1] & 0xFF) * dstA * (255 - a) / 255) / newA;
+			b = (b * a + (this.colors[offset + 2] & 0xFF) * dstA * (255 - a) / 255) / newA;
+			a = newA;
+		}
+		this.rank[index] = incomingRank;
 		this.colors[offset] = (byte) r;
 		this.colors[offset + 1] = (byte) g;
 		this.colors[offset + 2] = (byte) b;
@@ -113,8 +166,8 @@ public final class VoxelGrid {
 		boolean coloredB = (this.colors[b * 4 + 3] & 0xFF) > 0;
 
 		if (coloredA && coloredB) {
-			int rankA = this.rank[a] & 0xFFFF;
-			int rankB = this.rank[b] & 0xFFFF;
+			int rankA = this.rank[a];
+			int rankB = this.rank[b];
 			if (rankA == rankB) {
 				// Same window on both sides: keep each side's own colour so a
 				// feature present on one side is not erased by the other.
@@ -129,7 +182,7 @@ public final class VoxelGrid {
 	}
 
 	private void copyColor(int source, int a, int b) {
-		short sourceRank = this.rank[source];
+		int sourceRank = this.rank[source];
 		byte r = this.colors[source * 4];
 		byte g = this.colors[source * 4 + 1];
 		byte bl = this.colors[source * 4 + 2];

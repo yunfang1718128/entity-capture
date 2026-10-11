@@ -6,12 +6,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.yunfang.entitycapture.EntityCapture;
 import com.yunfang.entitycapture.mcvox.McvoxHeader;
 import com.yunfang.entitycapture.mcvox.McvoxWriter;
+import com.yunfang.entitycapture.mixin.PlayerModeCustomisationAccessor;
 import com.yunfang.entitycapture.texture.TextureSampler;
 import com.yunfang.entitycapture.voxel.VoxelGrid;
 import com.yunfang.entitycapture.voxel.Voxelizer;
@@ -19,9 +23,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +47,9 @@ public final class RenderCaptureService {
 	 * {@code .mcvox} and never a side-car {@code .quads.txt}.
 	 */
 	private static final boolean DUMP_QUADS = readDumpFlag();
+	private static final EntityDataAccessor<Byte> PLAYER_MODEL_PARTS = PlayerModeCustomisationAccessor.getModeCustomisation();
+	/** {@code PlayerModelPart.CAPE} owns bit 0 of the model-part byte; bits 1-6 are the skin's outer layers. */
+	private static final int PLAYER_MODEL_PART_CAPE_BIT = 0x01;
 
 	private RenderCaptureService() {
 	}
@@ -59,16 +68,41 @@ public final class RenderCaptureService {
 			preparePose(entity);
 
 			TextureSampler sampler = new TextureSampler();
-			CapturingMultiBufferSource buffers = new CapturingMultiBufferSource();
-			PoseStack poseStack = new PoseStack();
-			// Let renderers that grab the global buffer source (e.g. GeckoLib
-			// armour) be captured too; see BufferSourceMixin.
-			CaptureSession.begin(buffers);
-			dispatcher.render(entity, 0.0D, 0.0D, 0.0D, 0.0F, 0.0F, poseStack, buffers, LightTexture.FULL_BRIGHT);
-			buffers.flush();
-
-			List<Quad> quads = buffers.quads();
-			VoxelGrid grid = Voxelizer.voxelize(quads, sampler, UNITS_PER_BLOCK);
+			List<Quad> base;
+			List<Quad> overlay = List.of();
+			CapturingMultiBufferSource stats;
+			int modelParts = entity instanceof Player ? entity.getEntityData().get(PLAYER_MODEL_PARTS) : 0;
+			if ((modelParts & ~PLAYER_MODEL_PART_CAPE_BIT) != 0) {
+				// A skin's outer layer renders as a shell a fraction of a pixel
+				// outside the body, which the voxeliser must treat as a decal rather
+				// than solid geometry (see Voxelizer). Isolate it by rendering once
+				// with the six outer parts hidden and once with them back, then
+				// diffing: the delta is exactly the shell. The cape keeps its bit in
+				// the inner pass — it is a real hanging mesh, not an inflated shell,
+				// and must stay solid geometry.
+				entity.getEntityData().set(PLAYER_MODEL_PARTS, (byte) (modelParts & PLAYER_MODEL_PART_CAPE_BIT));
+				CapturingMultiBufferSource inner;
+				try {
+					inner = renderPass(entity, dispatcher);
+				} finally {
+					entity.getEntityData().set(PLAYER_MODEL_PARTS, (byte) modelParts);
+				}
+				CapturingMultiBufferSource full = renderPass(entity, dispatcher);
+				base = inner.quads();
+				overlay = notIn(inner.quads(), full.quads());
+				stats = full;
+				LOGGER.info("two-pass player capture: modelParts=0x{} innerQuads={} fullQuads={} overlayQuads={}",
+						Integer.toHexString(modelParts), base.size(), full.quads().size(), overlay.size());
+			} else {
+				CapturingMultiBufferSource buffers = renderPass(entity, dispatcher);
+				base = buffers.quads();
+				stats = buffers;
+				if (entity instanceof Player) {
+					LOGGER.info("single-pass player capture: modelParts=0x{} quads={}",
+							Integer.toHexString(modelParts), base.size());
+				}
+			}
+			VoxelGrid grid = Voxelizer.voxelize(base, overlay, sampler, UNITS_PER_BLOCK);
 
 			McvoxHeader header = new McvoxHeader(
 					McvoxWriter.FORMAT_VERSION,
@@ -85,17 +119,65 @@ public final class RenderCaptureService {
 			File directory = new File(client.gameDirectory, "entity-capture");
 			Path path = McvoxWriter.write(directory.toPath(), header, grid, true);
 
-			logSummary(entity, buffers, quads, grid, path, (System.nanoTime() - startedAt) / 1_000_000.0D);
+			List<Quad> quads = stats.quads();
+			logSummary(entity, stats, quads, grid, path, (System.nanoTime() - startedAt) / 1_000_000.0D);
 			if (DUMP_QUADS) {
 				dumpQuads(path, quads);
 			}
 
 			return new CaptureResult(path, quads.size(), grid.nonEmptyVoxels(), grid.sizeX, grid.sizeY, grid.sizeZ);
 		} finally {
-			CaptureSession.end();
 			CapturePose.setNeutralPose(false);
 			dispatcher.setRenderShadow(true);
 		}
+	}
+
+	/** One off-screen render of the entity into a capturing buffer. */
+	private static CapturingMultiBufferSource renderPass(Entity entity, EntityRenderDispatcher dispatcher) {
+		CapturingMultiBufferSource buffers = new CapturingMultiBufferSource();
+		PoseStack poseStack = new PoseStack();
+		// Let renderers that grab the global buffer source (e.g. GeckoLib
+		// armour) be captured too; see BufferSourceMixin.
+		CaptureSession.begin(buffers);
+		try {
+			dispatcher.render(entity, 0.0D, 0.0D, 0.0D, 0.0F, 0.0F, poseStack, buffers, LightTexture.FULL_BRIGHT);
+			buffers.flush();
+		} finally {
+			CaptureSession.end();
+		}
+		return buffers;
+	}
+
+	/** Quads present in {@code full} but not matched one-for-one by {@code inner}. */
+	private static List<Quad> notIn(List<Quad> inner, List<Quad> full) {
+		Map<String, Integer> remaining = new HashMap<>();
+		for (Quad quad : inner) {
+			remaining.merge(quadKey(quad), 1, Integer::sum);
+		}
+		List<Quad> overlay = new ArrayList<>();
+		for (Quad quad : full) {
+			String key = quadKey(quad);
+			Integer count = remaining.get(key);
+			if (count == null || count == 0) {
+				overlay.add(quad);
+			} else {
+				remaining.put(key, count - 1);
+			}
+		}
+		return overlay;
+	}
+
+	/** Identity of a quad for the two-pass diff: texture plus quantised geometry. */
+	private static String quadKey(Quad quad) {
+		StringBuilder key = new StringBuilder().append(quad.texture());
+		for (Vertex vertex : new Vertex[] { quad.v0(), quad.v1(), quad.v2(), quad.v3() }) {
+			key.append('|').append(Math.round(vertex.x * 1.0e5F)).append(',')
+					.append(Math.round(vertex.y * 1.0e5F)).append(',')
+					.append(Math.round(vertex.z * 1.0e5F)).append(',')
+					.append(Math.round(vertex.u * 1.0e5F)).append(',')
+					.append(Math.round(vertex.v * 1.0e5F));
+		}
+		return key.toString();
 	}
 
 	/**

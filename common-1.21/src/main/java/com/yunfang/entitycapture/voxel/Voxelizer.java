@@ -50,12 +50,40 @@ public final class Voxelizer {
 	private static final int MAX_SUPERSAMPLE = 4;
 	/** Supersample is dropped back to 1 when the resulting grid would exceed this. */
 	private static final long MAX_SUPERSAMPLE_VOXELS = 8_000_000L;
+	/**
+	 * Rank bias that makes an overlay (a skin's outer-layer) recolour always beat
+	 * the base surface it covers. Far above any real render-layer index, which is
+	 * a small per-capture counter.
+	 */
+	private static final int OVERLAY_LAYER_BASE = 1 << 12;
+	/**
+	 * How many voxels inward an overlay decal may look for the base surface it
+	 * covers. The player's outer layer is inflated by 0.25 model pixels (0.5 for
+	 * the hat) — under one voxel — so the covered surface is always within one
+	 * rasterised step; the extra step absorbs rounding at the plane boundary.
+	 */
+	private static final int MAX_DECAL_STEPS = 2;
 
 	private Voxelizer() {
 	}
 
 	public static VoxelGrid voxelize(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
-		if (quads.isEmpty()) {
+		return voxelize(quads, List.of(), sampler, unitsPerBlock);
+	}
+
+	/**
+	 * Voxelises {@code base} as solid geometry, then paints {@code overlay} onto
+	 * the surface it covers. {@code overlay} is a player skin's outer layer,
+	 * isolated by the two-pass render in
+	 * {@link com.yunfang.entitycapture.capture.RenderCaptureService}. That layer
+	 * is inflated by only a fraction of a model pixel, so it must <em>not</em>
+	 * grow the silhouette: every overlay quad is treated as a decal that recolours
+	 * the nearest existing base voxel found by stepping inward along its normal,
+	 * and never creates a voxel of its own. The grid is sized from {@code base}
+	 * alone, so a two-layer skin captures at the same dimensions as the bare body.
+	 */
+	public static VoxelGrid voxelize(List<Quad> base, List<Quad> overlay, TextureSampler sampler, int unitsPerBlock) {
+		if (base.isEmpty()) {
 			return new VoxelGrid(1, 1, 1);
 		}
 
@@ -75,7 +103,7 @@ public final class Voxelizer {
 		//    case does in the other direction. (The same trap catches every model
 		//    drawn at a fractional scale: illagers, villagers, witches and
 		//    wandering traders all use 15/16 too.)
-		double density = maxTexelDensity(quads, sampler, unitsPerBlock);
+		double density = maxTexelDensity(base, sampler, unitsPerBlock);
 		int factor = 1;
 		double geometryScale = 1.0D;
 		if (density > 1.0D + 1.0e-3) {
@@ -90,12 +118,17 @@ public final class Voxelizer {
 			geometryScale = density;
 		}
 		if (geometryScale != 1.0D) {
-			quads = scaleAll(quads, geometryScale);
+			base = scaleAll(base, geometryScale);
+			if (!overlay.isEmpty()) {
+				overlay = scaleAll(overlay, geometryScale);
+			}
 		}
 
 		double[] min = { Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE };
 		double[] max = { -Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE };
-		for (Quad quad : quads) {
+		// The grid is sized from the base alone: an overlay decal only ever
+		// recolours existing voxels, so it can never widen the model.
+		for (Quad quad : base) {
 			if (quad.texture() == null) {
 				continue;
 			}
@@ -123,19 +156,26 @@ public final class Voxelizer {
 		VoxelGrid grid = new VoxelGrid(size[0], size[1], size[2]);
 		RasterContext context = new RasterContext(grid, sampler, scale, origin, size);
 
-		for (Quad quad : quads) {
+		for (Quad quad : base) {
 			if (quad.texture() == null) {
 				continue;
 			}
-			rasterize(context, quad, quad.v0(), quad.v1(), quad.v2());
-			rasterize(context, quad, quad.v0(), quad.v2(), quad.v3());
+			rasterize(context, quad, quad.v0(), quad.v1(), quad.v2(), false);
+			rasterize(context, quad, quad.v0(), quad.v2(), quad.v3(), false);
+		}
+		for (Quad quad : overlay) {
+			if (quad.texture() == null) {
+				continue;
+			}
+			rasterize(context, quad, quad.v0(), quad.v1(), quad.v2(), true);
+			rasterize(context, quad, quad.v0(), quad.v2(), quad.v3(), true);
 		}
 
 		// Many mob models are mirror-symmetric about x = 0; rounding at the
 		// sub-pixel level (overlapping legs, fur layers, tilted arms) can still
 		// leave a one-voxel lopsided result, so mirror the +x half onto the -x
 		// half for those models.
-		if (isMirrorSymmetricX(quads)) {
+		if (isMirrorSymmetricX(base)) {
 			grid.enforceXMirrorSymmetry();
 		}
 		return grid;
@@ -254,7 +294,13 @@ public final class Voxelizer {
 		max[2] = Math.max(max[2], vertex.z);
 	}
 
-	private static void rasterize(RasterContext context, Quad quad, Vertex a, Vertex b, Vertex c) {
+	/**
+	 * Rasterises one triangle. For {@code decal == false} every covered cell is
+	 * marked (solid base geometry). For {@code decal == true} the triangle is a
+	 * skin's outer layer: each covered cell only recolours the nearest existing
+	 * voxel found by stepping inward along the face normal, and never creates one.
+	 */
+	private static void rasterize(RasterContext context, Quad quad, Vertex a, Vertex b, Vertex c, boolean decal) {
 		double nx = (double) (b.y - a.y) * (c.z - a.z) - (double) (b.z - a.z) * (c.y - a.y);
 		double ny = (double) (b.z - a.z) * (c.x - a.x) - (double) (b.x - a.x) * (c.z - a.z);
 		double nz = (double) (b.x - a.x) * (c.y - a.y) - (double) (b.y - a.y) * (c.x - a.x);
@@ -340,6 +386,8 @@ public final class Voxelizer {
 		endA = Math.min(endA, context.size()[axisA]);
 		endB = Math.min(endB, context.size()[axisB]);
 
+		int stepDir = dominantNormal > 0.0 ? -1 : 1;
+
 		for (int ia = startA; ia <= endA; ia++) {
 			double pa = originA + (ia + 0.5) / scale;
 			for (int ib = startB; ib <= endB; ib++) {
@@ -360,17 +408,46 @@ public final class Voxelizer {
 					off = nearest;
 				}
 				int ic = (int) Math.floor(off + inward + 1.0e-6);
-				if (ic < 0) {
-					ic = 0;
-				} else if (ic >= context.size()[dominant]) {
-					ic = context.size()[dominant] - 1;
-				}
 
-				int x = axisValue(dominant, axisA, axisB, 0, ic, ia, ib);
-				int y = axisValue(dominant, axisA, axisB, 1, ic, ia, ib);
-				int z = axisValue(dominant, axisA, axisB, 2, ic, ia, ib);
-				if (!context.grid().inBounds(x, y, z)) {
-					continue;
+				int x;
+				int y;
+				int z;
+				if (decal) {
+					// The outer layer sits under a voxel outside the body, so its
+					// face plane lands on — at most — one cell outside the surface
+					// it covers. Step inward until that surface is found; if none
+					// is, this texel covers nothing (e.g. a hat wall above the
+					// head) and is dropped rather than solidified.
+					x = -1;
+					y = -1;
+					z = -1;
+					for (int step = 0; step <= MAX_DECAL_STEPS; step++) {
+						int cell = ic + stepDir * step;
+						int cx2 = axisValue(dominant, axisA, axisB, 0, cell, ia, ib);
+						int cy2 = axisValue(dominant, axisA, axisB, 1, cell, ia, ib);
+						int cz2 = axisValue(dominant, axisA, axisB, 2, cell, ia, ib);
+						if (context.grid().isOccupied(cx2, cy2, cz2)) {
+							x = cx2;
+							y = cy2;
+							z = cz2;
+							break;
+						}
+					}
+					if (x < 0) {
+						continue;
+					}
+				} else {
+					if (ic < 0) {
+						ic = 0;
+					} else if (ic >= context.size()[dominant]) {
+						ic = context.size()[dominant] - 1;
+					}
+					x = axisValue(dominant, axisA, axisB, 0, ic, ia, ib);
+					y = axisValue(dominant, axisA, axisB, 1, ic, ia, ib);
+					z = axisValue(dominant, axisA, axisB, 2, ic, ia, ib);
+					if (!context.grid().inBounds(x, y, z)) {
+						continue;
+					}
 				}
 
 				float u = (float) (wA * a.u + wB * b.u + wC * c.u);
@@ -392,7 +469,11 @@ public final class Voxelizer {
 				int blue = clampByte((int) ((argb & 0xFF) * tintB));
 				int outAlpha = clampByte((int) (alpha * tintA));
 
-				context.grid().set(x, y, z, red, green, blue, outAlpha, facePriority, quad.layer());
+				if (decal) {
+					context.grid().paint(x, y, z, red, green, blue, outAlpha, facePriority, quad.layer() + OVERLAY_LAYER_BASE);
+				} else {
+					context.grid().set(x, y, z, red, green, blue, outAlpha, facePriority, quad.layer());
+				}
 			}
 		}
 	}
