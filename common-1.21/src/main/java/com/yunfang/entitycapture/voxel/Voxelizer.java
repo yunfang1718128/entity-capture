@@ -63,6 +63,13 @@ public final class Voxelizer {
 	 * rasterised step; the extra step absorbs rounding at the plane boundary.
 	 */
 	private static final int MAX_DECAL_STEPS = 2;
+	/**
+	 * How close (in texels) an interpolated texture coordinate must sit to a
+	 * texel boundary to count as landing exactly on it. Float32 UVs put a true
+	 * razor within ~1e-6 texels of the boundary; a genuinely off-centre voxel
+	 * sits at least ~1e-2 away, so the two never mix.
+	 */
+	private static final double RAZOR_TOLERANCE = 1.0e-4D;
 
 	private Voxelizer() {
 	}
@@ -449,6 +456,36 @@ public final class Voxelizer {
 
 		int stepDir = dominantNormal > 0.0 ? -1 : 1;
 
+		// A voxel centre can land exactly on the border between two texels — the
+		// razor. Truncation would take the texel below it on both sides of a
+		// mirrored face, and the pair would end up on texels that are not mirror
+		// images of each other (the lopsided eyes). At a razor the choice is made
+		// by geometry instead: the sample point is nudged toward the model's
+		// mirror planes, so every mirrored pair chooses mirrored texels. The
+		// gradients below say how each texel coordinate moves along each in-plane
+		// model axis, which is what decides "toward" in texel space.
+		double texelsU = 1.0D;
+		double texelsV = 1.0D;
+		double duDpa = 0.0D;
+		double duDpb = 0.0D;
+		double dvDpa = 0.0D;
+		double dvDpb = 0.0D;
+		boolean razorAware = false;
+		TextureImage textureImage = context.sampler().image(quad.texture());
+		if (textureImage != null) {
+			texelsU = textureImage.width;
+			texelsV = textureImage.height;
+			double dwAa = (by - cy) / denominator;
+			double dwBa = (cy - ay) / denominator;
+			double dwAb = (cx - bx) / denominator;
+			double dwBb = (ax - cx) / denominator;
+			duDpa = (dwAa * (a.u - c.u) + dwBa * (b.u - c.u)) * texelsU;
+			duDpb = (dwAb * (a.u - c.u) + dwBb * (b.u - c.u)) * texelsU;
+			dvDpa = (dwAa * (a.v - c.v) + dwBa * (b.v - c.v)) * texelsV;
+			dvDpb = (dwAb * (a.v - c.v) + dwBb * (b.v - c.v)) * texelsV;
+			razorAware = true;
+		}
+
 		for (int ia = startA; ia <= endA; ia++) {
 			double pa = originA + (ia + 0.5) / scale;
 			for (int ib = startB; ib <= endB; ib++) {
@@ -511,8 +548,14 @@ public final class Voxelizer {
 					}
 				}
 
-				float u = (float) (wA * a.u + wB * b.u + wC * c.u);
-				float v = (float) (wA * a.v + wB * b.v + wC * c.v);
+				double tu = (wA * a.u + wB * b.u + wC * c.u) * texelsU;
+				double tv = (wA * a.v + wB * b.v + wC * c.v) * texelsV;
+				if (razorAware) {
+					tu = razorSnap(tu, pa, pb, duDpa, duDpb);
+					tv = razorSnap(tv, pa, pb, dvDpa, dvDpb);
+				}
+				float u = (float) (tu / texelsU);
+				float v = (float) (tv / texelsV);
 				ResourceLocation texture = quad.texture();
 				int argb = context.sampler().sample(texture, u, v);
 				int alpha = (argb >>> 24) & 0xFF;
@@ -566,6 +609,38 @@ public final class Voxelizer {
 		return dominantNormal > 0.0
 				? (int) Math.floor(off - 0.5D + 1.0e-6)
 				: (int) Math.ceil(off - 0.5D - 1.0e-6);
+	}
+
+	/**
+	 * Breaks a texel-boundary tie mirror-consistently. At the border between
+	 * texels {@code k - 1} and {@code k}, truncation picks {@code k} on every
+	 * side, so the two halves of a mirrored face (or a mirrored pair of quads)
+	 * land on texels that are not mirror images of each other. Here the tie is
+	 * broken by geometry instead: the in-plane sample point is nudged toward the
+	 * model's mirror planes, which moves the texel coordinate along whichever
+	 * axis it varies on — toward {@code x = 0} on a front face, toward
+	 * {@code z = 0} along a side wall. The two members of every mirror pair
+	 * then pick mirrored texels, whatever the pitch.
+	 *
+	 * @param texel  the interpolated texture coordinate, in texels
+	 * @param pa     the sample point's model coordinate along the first in-plane axis
+	 * @param pb     the sample point's model coordinate along the second in-plane axis
+	 * @param gradA  how fast {@code texel} moves per unit of {@code pa}
+	 * @param gradB  how fast {@code texel} moves per unit of {@code pb}
+	 */
+	private static double razorSnap(double texel, double pa, double pb, double gradA, double gradB) {
+		double boundary = Math.rint(texel);
+		if (Math.abs(texel - boundary) > RAZOR_TOLERANCE) {
+			return texel;
+		}
+		double toward = -(Math.signum(pa) * gradA + Math.signum(pb) * gradB);
+		if (toward > 0.0) {
+			return boundary + 0.5D;
+		}
+		if (toward < 0.0) {
+			return boundary - 0.5D;
+		}
+		return texel;
 	}
 
 	private static int facePriority(double nx, double ny, double nz) {
