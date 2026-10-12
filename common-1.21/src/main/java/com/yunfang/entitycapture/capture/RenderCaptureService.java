@@ -21,8 +21,11 @@ import com.yunfang.entitycapture.texture.TextureSampler;
 import com.yunfang.entitycapture.voxel.VoxelGrid;
 import com.yunfang.entitycapture.voxel.Voxelizer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.entity.player.PlayerRenderer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.resources.ResourceLocation;
@@ -111,7 +114,9 @@ public final class RenderCaptureService {
 				}
 			}
 			Voxelizer.Stats voxelStats = new Voxelizer.Stats();
-			VoxelGrid grid = Voxelizer.voxelize(base, overlay, sampler, UNITS_PER_BLOCK, voxelStats);
+			Double densityOverride = entity instanceof Player ? playerDensity((Player) entity, base, sampler) : null;
+			VoxelGrid grid = Voxelizer.voxelize(base, overlay, sampler, UNITS_PER_BLOCK, voxelStats,
+					Voxelizer.Options.REPAIR, densityOverride);
 
 			McvoxHeader header = new McvoxHeader(
 					McvoxWriter.FORMAT_VERSION,
@@ -155,6 +160,83 @@ public final class RenderCaptureService {
 			CaptureSession.end();
 		}
 		return buffers;
+	}
+
+	/**
+	 * Density basis for a player capture, or null to keep the global maximum.
+	 * The global maximum lets one coarse-textured held item or mod armour rescale
+	 * the whole body off the voxel grid, which is what deforms the player itself.
+	 * Config options are consulted in the precedence skin &gt; mode &gt; minimum;
+	 * an enabled option that cannot yield a value falls through to the next one.
+	 */
+	private static Double playerDensity(Player player, List<Quad> base, TextureSampler sampler) {
+		EntityCaptureConfig config = EntityCaptureConfig.get();
+		if (!config.playerSkinDensity && !config.playerModeDensity && !config.playerMinDensity) {
+			return null;
+		}
+		Map<ResourceLocation, Double> byTexture = Voxelizer.texelDensityByTexture(base, sampler, UNITS_PER_BLOCK);
+		if (byTexture.isEmpty()) {
+			return null;
+		}
+		if (config.playerSkinDensity) {
+			ResourceLocation skin = skinTexture(player);
+			Double density = skin == null ? null : byTexture.get(skin);
+			if (density != null && density > 1.0e-6) {
+				LOGGER.info("player density basis: skin {} density={}", skin, String.format("%.4f", density));
+				return density;
+			}
+			LOGGER.info("player density basis: skin unavailable ({}), falling through", skin);
+		}
+		if (config.playerModeDensity) {
+			Double mode = modeDensity(byTexture);
+			if (mode != null) {
+				LOGGER.info("player density basis: mode density={}", String.format("%.4f", mode));
+				return mode;
+			}
+			LOGGER.info("player density basis: no repeating density, falling through");
+		}
+		if (config.playerMinDensity) {
+			double min = Double.MAX_VALUE;
+			for (double density : byTexture.values()) {
+				min = Math.min(min, density);
+			}
+			if (min > 1.0e-6 && min < Double.MAX_VALUE) {
+				LOGGER.info("player density basis: minimum density={}", String.format("%.4f", min));
+				return min;
+			}
+		}
+		return null;
+	}
+
+	/** The texture the player renderer is actually drawing the body with. */
+	private static ResourceLocation skinTexture(Player player) {
+		if (!(player instanceof AbstractClientPlayer clientPlayer)) {
+			return null;
+		}
+		EntityRenderer<?> renderer = Minecraft.getInstance().getEntityRenderDispatcher().getRenderer(player);
+		return renderer instanceof PlayerRenderer playerRenderer ? playerRenderer.getTextureLocation(clientPlayer) : null;
+	}
+
+	/**
+	 * The per-texture density shared by at least two textures, bucketed to 0.001
+	 * so float noise in posed geometry still counts as the same pitch; ties go to
+	 * the coarser bucket. Null when no density repeats — a model of all-different
+	 * pitches has no majority to follow.
+	 */
+	private static Double modeDensity(Map<ResourceLocation, Double> byTexture) {
+		Map<Long, Integer> buckets = new HashMap<>();
+		for (double density : byTexture.values()) {
+			buckets.merge(Math.round(density * 1000.0D), 1, Integer::sum);
+		}
+		long best = 0;
+		int bestCount = 1;
+		for (Map.Entry<Long, Integer> bucket : buckets.entrySet()) {
+			if (bucket.getValue() > bestCount || (bucket.getValue() == bestCount && bucket.getKey() > best)) {
+				best = bucket.getKey();
+				bestCount = bucket.getValue();
+			}
+		}
+		return bestCount >= 2 ? best / 1000.0D : null;
 	}
 
 	/** Quads present in {@code full} but not matched one-for-one by {@code inner}. */

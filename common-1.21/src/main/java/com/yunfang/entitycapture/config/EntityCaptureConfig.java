@@ -48,6 +48,16 @@ public final class EntityCaptureConfig {
 	 */
 	public boolean dumpQuads = false;
 
+	/**
+	 * Player captures only — what texture pitch the voxel scale is matched to.
+	 * Resolved in the order skin &gt; mode &gt; minimum: the first enabled option
+	 * whose value can be computed wins; with all three off the old behaviour
+	 * (global maximum over every texture) is kept.
+	 */
+	public boolean playerSkinDensity = true;
+	public boolean playerModeDensity = false;
+	public boolean playerMinDensity = false;
+
 	/** An option and the comment block that explains it in the file. */
 	private record Option(String key, String[] comment, Function<EntityCaptureConfig, Boolean> value) {
 		private String line(EntityCaptureConfig config) {
@@ -94,7 +104,32 @@ public final class EntityCaptureConfig {
 					"# On: each capture also writes a <name>.mcvox.quads.txt beside the .mcvox, listing",
 					"# every quad it received (position, UV, tint, normal, texture). Diagnostics only;",
 					"# it does not change the capture. Turn it back off so the files do not pile up.", },
-					c -> c.dumpQuads));
+					c -> c.dumpQuads),
+			new Option("playerSkinDensity", new String[] {
+					"# 玩家密度基准：皮肤（默认开启）/ Player density basis: skin (default: on)",
+					"# 以下三项都只在捕获玩家时生效，决定体素缩放按哪个纹理密度来定：",
+					"# 优先顺序 皮肤 > 众数 > 最小，取第一个能算出值的开启项；三项全关 = 旧行为（全局最大密度）。",
+					"# All three options below apply to player captures only. They pick which texture",
+					"# pitch the voxel scale is matched to, in the precedence skin > mode > minimum:",
+					"# the first enabled option that yields a value wins; all off = legacy global maximum.",
+					"# 本项：按玩家皮肤贴图自己的密度定缩放，盔甲 / 手持模组物品的贴图",
+					"# 不再能拉着全身偏离体素网格（主人物变形的根源）。皮肤不可用时顺延下一项。",
+					"# This one: match the player skin's own density, so armour and held mod items can",
+					"# no longer knock the body off the voxel grid. Falls through when unavailable.", },
+					c -> c.playerSkinDensity),
+			new Option("playerModeDensity", new String[] {
+					"# 玩家密度基准：众数（默认关闭）/ Player density basis: mode (default: off)",
+					"# 按本次捕获所有贴图中出现次数最多的那个密度缩放（0.001 分桶，并列取较大；",
+					"# 没有任何密度出现两次则视为不可用，顺延下一项）。",
+					"# Scale by the most common per-texture density in this capture (buckets of 0.001,",
+					"# ties go to the coarser; if no density repeats, falls through to the next option).", },
+					c -> c.playerModeDensity),
+			new Option("playerMinDensity", new String[] {
+					"# 玩家密度基准：最小（默认关闭）/ Player density basis: minimum (default: off)",
+					"# 按所有贴图密度中的最小值缩放：宁可把纹理欠采样的贴图变模糊，也不让全身被放大错位。",
+					"# Scale by the smallest per-texture density: finer textures get blurred rather than",
+					"# the whole model being rescaled off-grid by one coarse texture.", },
+					c -> c.playerMinDensity));
 
 	private EntityCaptureConfig() {
 	}
@@ -147,6 +182,9 @@ public final class EntityCaptureConfig {
 				case "keepEquipment" -> this.keepEquipment = flag;
 				case "poseCapture" -> this.poseCapture = flag;
 				case "dumpQuads" -> this.dumpQuads = flag;
+				case "playerSkinDensity" -> this.playerSkinDensity = flag;
+				case "playerModeDensity" -> this.playerModeDensity = flag;
+				case "playerMinDensity" -> this.playerMinDensity = flag;
 				default -> {
 				}
 			}

@@ -1,7 +1,9 @@
 package com.yunfang.entitycapture.voxel;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.yunfang.entitycapture.capture.Quad;
 import com.yunfang.entitycapture.capture.Vertex;
@@ -142,6 +144,19 @@ public final class Voxelizer {
 	/** As above, with the symmetry policy chosen by the caller. */
 	public static VoxelGrid voxelize(List<Quad> base, List<Quad> overlay, TextureSampler sampler,
 			int unitsPerBlock, Stats stats, Options options) {
+		return voxelize(base, overlay, sampler, unitsPerBlock, stats, options, null);
+	}
+
+	/**
+	 * As above, with the texture pitch the whole model is matched to chosen by the
+	 * caller instead of by this class. {@code densityOverride} replaces the global
+	 * maximum: the pitch of one specific texture (a player's own skin), the mode
+	 * of the per-texture pitches, or the smallest of them — anything but the
+	 * maximum, which lets a single coarse-textured held item rescale the whole
+	 * body off the voxel grid. Null keeps the global-maximum behaviour.
+	 */
+	public static VoxelGrid voxelize(List<Quad> base, List<Quad> overlay, TextureSampler sampler,
+			int unitsPerBlock, Stats stats, Options options, Double densityOverride) {
 		if (base.isEmpty()) {
 			return new VoxelGrid(1, 1, 1);
 		}
@@ -162,7 +177,7 @@ public final class Voxelizer {
 		//    case does in the other direction. (The same trap catches every model
 		//    drawn at a fractional scale: illagers, villagers, witches and
 		//    wandering traders all use 15/16 too.)
-		double density = maxTexelDensity(base, sampler, unitsPerBlock);
+		double density = densityOverride != null ? densityOverride : maxTexelDensity(base, sampler, unitsPerBlock);
 		stats.densityUsed = density;
 		int factor = 1;
 		double geometryScale = 1.0D;
@@ -272,6 +287,22 @@ public final class Voxelizer {
 	 */
 	private static double maxTexelDensity(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
 		double density = 0.0D;
+		for (double perTexture : texelDensityByTexture(quads, sampler, unitsPerBlock).values()) {
+			density = Math.max(density, perTexture);
+		}
+		return density;
+	}
+
+	/**
+	 * The largest texture-texels-per-voxel ratio per distinct texture, in first-
+	 * encounter order. A model is usually assembled from several textures whose
+	 * pitches disagree (a player's skin, modded armour, a held item); the global
+	 * maximum over all of them lets the coarsest texture decide the whole model's
+	 * scale, so callers that want a different basis (one texture, the mode, the
+	 * minimum) pick it from this map. Textures that could not be read are absent.
+	 */
+	public static Map<ResourceLocation, Double> texelDensityByTexture(List<Quad> quads, TextureSampler sampler, int unitsPerBlock) {
+		Map<ResourceLocation, Double> byTexture = new LinkedHashMap<>();
 		for (Quad quad : quads) {
 			if (quad.texture() == null) {
 				continue;
@@ -280,10 +311,11 @@ public final class Voxelizer {
 			if (image == null) {
 				continue;
 			}
-			density = Math.max(density, texelDensity(quad.v0(), quad.v1(), image, unitsPerBlock));
+			double density = texelDensity(quad.v0(), quad.v1(), image, unitsPerBlock);
 			density = Math.max(density, texelDensity(quad.v1(), quad.v2(), image, unitsPerBlock));
+			byTexture.merge(quad.texture(), density, Math::max);
 		}
-		return density;
+		return byTexture;
 	}
 
 	/** Uniformly scales every vertex position (UV, tint and normal untouched). */
